@@ -1,0 +1,8 @@
+[Unit]
+Description="CodeReady Containers"
+
+[Service]
+Type=notify
+User=kevin
+TimeoutStartSec=10min
+ExecStart=/usr/local/bin/python-crc-systemd system-start

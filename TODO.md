@@ -1,0 +1,4 @@
+- forward logs from user service to system service?
+- have service register itself with dbus to make restarts / stops easier
+- move "all" code to asyncio (for above)
+- document everything
