@@ -27,6 +27,7 @@ class OpenShiftStatus(enum.Enum):
     unreachable = "Unreachable"
     stopped = "Stopped"
     starting = "Starting"
+    degraded = "Degraded"
 
 
 class StatusOutput:
@@ -78,12 +79,4 @@ async def monitor(interval: float):
         journal.send("Running crc status check", PRIORITY=syslog.LOG_DEBUG)
         _status = await status()
         print(datetime.datetime.now(), _status)
-        if _status.crc_status == CrcStatus.stopped:
-            return
-        elif _status.openshift_status == OpenShiftStatus.stopped:
-            return
-        else:
-            journal.send(
-                "Sleeping status check for interval", PRIORITY=syslog.LOG_DEBUG
-            )
-            await asyncio.sleep(interval)
+        await asyncio.sleep(interval)
