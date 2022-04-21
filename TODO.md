@@ -1,4 +1,4 @@
 - forward logs from user service to system service?
-- have service register itself with dbus to make restarts / stops easier
-- move "all" code to asyncio (for above)
 - document everything
+- should system runner and user runner work more similarly for monitoring? Am I doing cancellation and disconnection correctly?
+    - well they _are_ different. one wants to keep putting crc status out there but the other does polling when trying to stop.
