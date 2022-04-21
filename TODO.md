@@ -7,4 +7,5 @@
 - handle stop correctly:
     - if busctl exits immediately after calling then systemd will decide to send a kill because it's not done yet
     - handle signals that happen before full start (if not started yet it send KillSignal)
+    - we still want dbus because then we have some hope of waiting on crc stop
 

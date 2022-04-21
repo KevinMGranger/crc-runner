@@ -11,6 +11,7 @@ from dbus_next.aio import MessageBus, ProxyObject
 from dbus_next.service import ServiceInterface, method
 from systemd import journal
 
+from crc_systemd.async_helpers import SigTermError, check_signal, term_on_cancel
 from crc_systemd import crc, dbus, systemd
 from crc_systemd.dbus import make_proxy
 from crc_systemd.systemd import Notify, UnitActiveState
@@ -25,7 +26,8 @@ class CrcRunner(ServiceInterface):
         super().__init__("fyi.kmg.crc_runner.Runner1")
         self.bus = bus
         self.start_proc = start_proc
-        self.start_task = asyncio.create_task(start_proc.wait())
+        self.start_task = asyncio.create_task(term_on_cancel(start_proc))
+        self.monitor_task = None
         self.stop_proc = None
 
     # async def start(self):
@@ -35,7 +37,6 @@ class CrcRunner(ServiceInterface):
     #     #     case 0:
     #     #         Notify.ready(status="CRC Started")
 
-
     @method()
     async def stop(self):
         Notify.stopping()
@@ -44,15 +45,14 @@ class CrcRunner(ServiceInterface):
         # We will get a signal instead,
         # so we don't need to wait as long as we notify correctly
 
-        self.stop_proc = await crc.stop()
-        await self.stop_proc.wait()
+        print("Stopping start task")
+        self.start_task.cancel(msg="Stopping start_task from stop()")
 
-        # crap, waas this all even necessary?
-        # you fundamentally can't exit without the signal
-        # because once you reply the call exits, and if it's still up you get signal (what)
-        
-        self.bus.disconnect()
-        await self.bus.wait_for_disconnect()
+        print("Running crc stop")
+        self.stop_proc = await crc.stop()
+        print("Awaiting stop")
+        await self.stop_proc.wait()
+        print("Stop exited")
 
     async def __call__(self):
         # TODO: can crc start fail but still have the vm running?
@@ -60,26 +60,36 @@ class CrcRunner(ServiceInterface):
         # it'll return 1, but we can ignore that since we're
         # already in a defacto
         # error handler / exception handler / destructor
-
-        # TODO: is it okay to call terminate on an already-exited process?
-
-        # TODO:how do we fit waiting on the bus into here?
-        # do we even need to?
-        # I guess we do in the happy path
         try:
-            returncode = await self.start_task
+            returncode = await check_signal(self.start_task)
+
             if returncode == 0:
                 Notify.ready("CRC Started")
             else:
                 raise subprocess.CalledProcessError(returncode, "crc start")
-            
-            await self.bus.wait_for_disconnect()
-        except CancelledError:
-            self.start_proc.terminate()
-            raise
-        finally:
-            self.bus.disconnect()
+        except SigTermError as e:
+            if self.start_proc.returncode is None:
+                self.start_proc.terminate()
 
+            start_returncode = await self.start_task
+            if start_returncode == 0:
+                self.stop_proc = await crc.stop()
+                await self.stop_proc.wait()
+                sys.exit(128 + e.signal.value)
+            else:
+                sys.exit(start_returncode)
+        except CancelledError:
+            # this can only come from the process task, right?
+            # There's no way the signal checker could be cancelled?
+            start_returncode = await self.start_task
+            if start_returncode == 0:
+                self.stop_proc = await crc.stop()
+                await self.stop_proc.wait()
+                raise
+            else:
+                raise subprocess.CalledProcessError(start_returncode, "crc start")
+
+        await crc.monitor(POLL_INTERVAL_SECONDS)
 
 
 class CrcUserServiceRunner(ServiceInterface):
