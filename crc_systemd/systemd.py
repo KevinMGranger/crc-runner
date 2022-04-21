@@ -1,7 +1,9 @@
-import systemd.daemon
 import enum
-from crc_systemd import dbus
+
+import systemd.daemon
 from dbus_next.aio import MessageBus
+
+from crc_systemd import dbus
 
 
 class Notify:
@@ -51,7 +53,7 @@ MANAGER_IFACE = "org.freedesktop.systemd1.Manager"
 SERVICE_IFACE = "org.freedesktop.systemd1.Service"
 UNIT_IFACE = "org.freedesktop.systemd1.Unit"
 
+
 def karen(bus: MessageBus):
     "Ask to speak to the (systemd) manager"
     return dbus.make_proxy(bus, BUS_NAME, MANAGER_IFACE)
-

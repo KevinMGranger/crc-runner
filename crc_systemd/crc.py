@@ -1,9 +1,9 @@
-import pathlib
-import datetime
-import json
 import asyncio
 import asyncio.subprocess
+import datetime
 import enum
+import json
+import pathlib
 
 CRC_PATH = pathlib.Path.home() / ".crc/bin/crc"
 CRC_START_ARGS = ["start"]

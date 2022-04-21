@@ -1,6 +1,7 @@
-from dbus_next.constants import BusType
 import os
+
 import dbus_next.aio as aio
+from dbus_next.constants import BusType
 
 
 async def make_proxy(bus, bus_name, path) -> aio.ProxyObject:
