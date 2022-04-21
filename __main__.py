@@ -1,19 +1,20 @@
 #!/usr/bin/python
-
 import asyncio
 import asyncio.subprocess as aproc
+import datetime
 import subprocess
 import sys
+import syslog
 
 from dbus_next.aio import MessageBus, ProxyObject
 from dbus_next.service import ServiceInterface, method
+from systemd import journal
 
 from crc_systemd import crc, dbus, systemd
 from crc_systemd.dbus import make_proxy
 from crc_systemd.systemd import Notify, UnitActiveState
 
 POLL_INTERVAL_SECONDS = 6
-LOG_INFO = 6
 
 
 class CrcRunner(ServiceInterface):
@@ -157,7 +158,7 @@ class CrcUserServiceRunner(ServiceInterface):
 
 
 async def start():
-    print("Connecting to dbus")
+    print("Connecting to dbus", flush=True)
     bus = await dbus.connect()
     print("Starting CRC instance")
     runner = CrcRunner(bus, await crc.start())
@@ -180,9 +181,16 @@ async def system_start():
     await bus.wait_for_disconnect()
 
 
+async def log_statuses():
+    while True:
+        _status = await crc.status()
+        print(datetime.datetime.now(), _status)
+        await asyncio.sleep(POLL_INTERVAL_SECONDS)
+
+
 match sys.argv[1]:
     case "log_statuses":
-        asyncio.run(crc.monitor(POLL_INTERVAL_SECONDS))
+        asyncio.run(log_statuses())
     case "start":
         asyncio.run(start())
     case "system-start":
