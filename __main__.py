@@ -5,6 +5,7 @@ import datetime
 import subprocess
 import sys
 import syslog
+from asyncio import CancelledError
 
 from dbus_next.aio import MessageBus, ProxyObject
 from dbus_next.service import ServiceInterface, method
@@ -24,6 +25,7 @@ class CrcRunner(ServiceInterface):
         super().__init__("fyi.kmg.crc_runner.Runner1")
         self.bus = bus
         self.start_proc = start_proc
+        self.start_task = asyncio.create_task(start_proc.wait())
         self.stop_proc = None
 
     # async def start(self):
@@ -33,44 +35,51 @@ class CrcRunner(ServiceInterface):
     #     #     case 0:
     #     #         Notify.ready(status="CRC Started")
 
-    async def _handle_stop(self, returncode: int):
-        if returncode == 0:
-            self.stop_proc = await crc.stop()
-            await self.stop_proc.wait()
-            return
-
-        status = await crc.status()
-
-        if status.crc_status == crc.CrcStatus.stopped:
-            return
-        elif status.openshift_status == status.openshift_status.stopped:
-            return
-
-        self.stop_proc = await crc.stop()
-        await self.stop_proc.wait()
 
     @method()
     async def stop(self):
         Notify.stopping()
-        if self.start_proc.returncode is None:
-            self.start_proc.terminate()
-            returncode = await self.start_proc.wait()
-        else:
-            returncode = self.start_proc.returncode
 
-        await self._handle_stop(returncode)
+        # this will not be called if still starting!
+        # We will get a signal instead,
+        # so we don't need to wait as long as we notify correctly
 
+        self.stop_proc = await crc.stop()
+        await self.stop_proc.wait()
+
+        # crap, waas this all even necessary?
+        # you fundamentally can't exit without the signal
+        # because once you reply the call exits, and if it's still up you get signal (what)
+        
         self.bus.disconnect()
+        await self.bus.wait_for_disconnect()
 
-    # TODO: should keep track of the start task so it can be cancelled correctly
-    # requires refactoring / coordinating between wait_for_start as well as stop
+    async def __call__(self):
+        # TODO: can crc start fail but still have the vm running?
+        # crc stop will "work" even if it's already stopped.
+        # it'll return 1, but we can ignore that since we're
+        # already in a defacto
+        # error handler / exception handler / destructor
 
-    async def wait_for_start(self):
-        returncode = await self.start_proc.wait()
-        if returncode == 0:
-            Notify.ready("CRC Started")
-        else:
-            raise subprocess.CalledProcessError(returncode, "crc start")
+        # TODO: is it okay to call terminate on an already-exited process?
+
+        # TODO:how do we fit waiting on the bus into here?
+        # do we even need to?
+        # I guess we do in the happy path
+        try:
+            returncode = await self.start_task
+            if returncode == 0:
+                Notify.ready("CRC Started")
+            else:
+                raise subprocess.CalledProcessError(returncode, "crc start")
+            
+            await self.bus.wait_for_disconnect()
+        except CancelledError:
+            self.start_proc.terminate()
+            raise
+        finally:
+            self.bus.disconnect()
+
 
 
 class CrcUserServiceRunner(ServiceInterface):
@@ -165,8 +174,7 @@ async def start():
     bus.export("/fyi/kmg/crc_runner/Runner1", runner)
     await bus.request_name("fyi.kmg.crc_runner")
     asyncio.create_task(crc.monitor(POLL_INTERVAL_SECONDS))
-    await runner.wait_for_start()
-    await bus.wait_for_disconnect()
+    await runner()
 
 
 async def system_start():
