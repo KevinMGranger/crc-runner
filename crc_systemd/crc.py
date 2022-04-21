@@ -4,6 +4,9 @@ import datetime
 import enum
 import json
 import pathlib
+import syslog
+
+from systemd import journal
 
 CRC_PATH = pathlib.Path.home() / ".crc/bin/crc"
 CRC_START_ARGS = ["start"]
@@ -72,6 +75,7 @@ async def stop() -> asyncio.subprocess.Process:
 
 async def monitor(interval: float):
     while True:
+        journal.send("Running crc status check", PRIORITY=syslog.LOG_DEBUG)
         _status = await status()
         print(datetime.datetime.now(), _status)
         if _status.crc_status == CrcStatus.stopped:
@@ -79,4 +83,7 @@ async def monitor(interval: float):
         elif _status.openshift_status == OpenShiftStatus.stopped:
             return
         else:
+            journal.send(
+                "Sleeping status check for interval", PRIORITY=syslog.LOG_DEBUG
+            )
             await asyncio.sleep(interval)
