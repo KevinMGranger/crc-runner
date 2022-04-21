@@ -5,13 +5,16 @@ install:
 sysinstall:
 	sudo sh -c "cp crc-system.service /etc/systemd/system/crc.service && cp __main__.py /usr/local/bin/python-crc-systemd && systemctl daemon-reload"
 
-urun:
+ustart:
 	systemctl --user start crc.service
 
 ustat:
 	systemctl --user status crc.service
 
-sysrun:
+ustop:
+	systemctl --user stop crc.service
+
+sysstart:
 	sudo systemctl start crc
 
 sysstat:
