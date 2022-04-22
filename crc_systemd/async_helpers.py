@@ -1,8 +1,8 @@
 import asyncio
-from asyncio.subprocess import Process
 import collections.abc as abc
 import signal
 import typing
+from asyncio.subprocess import Process
 
 sigterm = asyncio.Event()
 
@@ -50,12 +50,3 @@ async def check_signal(
             raise SigTermError
         elif awaitable_task in done:
             return awaitable_task.result()
-
-
-async def term_on_cancel(proc: Process) -> int:
-    "Terminate the given process if this coroutine is cancelled."
-    try:
-        return await proc.wait()
-    except asyncio.CancelledError:
-        proc.terminate()
-        raise
