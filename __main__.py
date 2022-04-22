@@ -11,8 +11,8 @@ from dbus_next.aio import MessageBus, ProxyObject
 from dbus_next.service import ServiceInterface, method
 from systemd import journal
 
-from crc_systemd.async_helpers import SigTermError, check_signal, term_on_cancel
 from crc_systemd import crc, dbus, systemd
+from crc_systemd.async_helpers import SigTermError, check_signal
 from crc_systemd.dbus import make_proxy
 from crc_systemd.systemd import Notify, UnitActiveState
 
@@ -26,7 +26,7 @@ class CrcRunner(ServiceInterface):
         super().__init__("fyi.kmg.crc_runner.Runner1")
         self.bus = bus
         self.start_proc = start_proc
-        self.start_task = asyncio.create_task(term_on_cancel(start_proc))
+        self.start_task = asyncio.create_task(start_proc.wait())
         self.monitor_task = None
         self.stop_proc = None
 
@@ -45,14 +45,17 @@ class CrcRunner(ServiceInterface):
         # We will get a signal instead,
         # so we don't need to wait as long as we notify correctly
 
-        print("Stopping start task")
+        if not self.start_task.done():
+            Notify.notify("Stopping start task")
+        # do this regardless to avoid race condition
         self.start_task.cancel(msg="Stopping start_task from stop()")
+        try:
+            await self.start_task
+        except CancelledError:
+            pass
 
-        print("Running crc stop")
         self.stop_proc = await crc.stop()
-        print("Awaiting stop")
         await self.stop_proc.wait()
-        print("Stop exited")
 
     async def __call__(self):
         # TODO: can crc start fail but still have the vm running?
@@ -68,9 +71,6 @@ class CrcRunner(ServiceInterface):
             else:
                 raise subprocess.CalledProcessError(returncode, "crc start")
         except SigTermError as e:
-            if self.start_proc.returncode is None:
-                self.start_proc.terminate()
-
             start_returncode = await self.start_task
             if start_returncode == 0:
                 self.stop_proc = await crc.stop()
@@ -79,17 +79,12 @@ class CrcRunner(ServiceInterface):
             else:
                 sys.exit(start_returncode)
         except CancelledError:
-            # this can only come from the process task, right?
-            # There's no way the signal checker could be cancelled?
-            start_returncode = await self.start_task
-            if start_returncode == 0:
-                self.stop_proc = await crc.stop()
-                await self.stop_proc.wait()
-                raise
-            else:
-                raise subprocess.CalledProcessError(start_returncode, "crc start")
+            # can only come from the start task being cancelled,
+            # perhaps by close()
+            self.stop_proc = await crc.stop()
+            await self.stop_proc.wait()
 
-        await crc.monitor(POLL_INTERVAL_SECONDS)
+        await self.bus.wait_for_disconnect()
 
 
 class CrcUserServiceRunner(ServiceInterface):
@@ -180,6 +175,8 @@ async def start():
     print("Connecting to dbus", flush=True)
     bus = await dbus.connect()
     print("Starting CRC instance")
+    # TODO: race condition if crc is started before runner()
+    # listens for cancellation
     runner = CrcRunner(bus, await crc.start())
     bus.export("/fyi/kmg/crc_runner/Runner1", runner)
     await bus.request_name("fyi.kmg.crc_runner")
