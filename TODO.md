@@ -1,11 +1,14 @@
 - forward logs from user service to system service?
+    - I was thinking this would lose us the process name, but it turns out we already don't have that
+        - (well, let's double verify that in the verbose format)
+    - gotta test setting the process PID in the log
+    - this isn't actually necessary. we don't need to watchdog tbh
 - document everything
 - should system runner and user runner work more similarly for monitoring? Am I doing cancellation and disconnection correctly?
     - well they _are_ different. one wants to keep putting crc status out there but the other does polling when trying to stop.
+    - could also connect to the runner directly and wait for a signal!
+        - will that work though? It'll get sent immediately? cuz one close exits it'll get signaled.
 
-- user level monitor not running?
-- handle stop correctly:
-    - if busctl exits immediately after calling then systemd will decide to send a kill because it's not done yet
-    - handle signals that happen before full start (if not started yet it send KillSignal)
-    - we still want dbus because then we have some hope of waiting on crc stop
-
+- handle start correctly:
+    - if already running via crc status, should just say "yeah it's up"! and skip start step
+        - should separate start and wait tasks for this, back into separate functions
