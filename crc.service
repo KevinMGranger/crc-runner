@@ -1,6 +1,9 @@
 [Unit]
 Description="CodeReady Containers"
 
+[Install]
+WantedBy=default.target
+
 [Service]
 Type=notify
 TimeoutStartSec=10min
