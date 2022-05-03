@@ -19,7 +19,8 @@ from crc_systemd.systemd import Notify, UnitActiveState
 POLL_INTERVAL_SECONDS = 6
 
 
-class CrcRunner(ServiceInterface):
+class UserCrcRunner(ServiceInterface):
+    "Starts and monitors CRC, reacting to a stop request by shutting it down."
     stop_proc: aproc.Process | None
 
     def __init__(self, bus: MessageBus, start_proc: aproc.Process):
@@ -87,7 +88,11 @@ class CrcRunner(ServiceInterface):
         await self.bus.wait_for_disconnect()
 
 
-class CrcUserServiceRunner(ServiceInterface):
+class SystemCrcUserRunner(ServiceInterface):
+    """
+    Starts and watches the user-level CRC service.
+    Meant to be paired with a system-level HAProxy.
+    """
     def __init__(self, bus: MessageBus, systemd_prox: ProxyObject):
         self.bus = bus
         self.systemd_prox = systemd_prox
@@ -177,7 +182,7 @@ async def start():
     print("Starting CRC instance")
     # TODO: race condition if crc is started before runner()
     # listens for cancellation
-    runner = CrcRunner(bus, await crc.start())
+    runner = UserCrcRunner(bus, await crc.start())
     bus.export("/fyi/kmg/crc_runner/Runner1", runner)
     await bus.request_name("fyi.kmg.crc_runner")
     asyncio.create_task(crc.monitor(POLL_INTERVAL_SECONDS))
@@ -188,7 +193,10 @@ async def system_start():
     print("Connecting to dbus")
     bus = await dbus.connect()
     print("Asking user session to start CRC")
-    runner = CrcUserServiceRunner(bus, await systemd.karen(bus))
+    runner = SystemCrcUserRunner(bus, await systemd.karen(bus))
+    # TODO: hang on, this is different!
+    # We need the user bus to communicate with the systemd session there,
+    # but we need the system bus to listen for stop requests ourselves!
     bus.export("/fyi/kmg/crc_runner/SysRunner1", runner)
     await bus.request_name("fyi.kmg.crc_runner")
     await runner.start()
