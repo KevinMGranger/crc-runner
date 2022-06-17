@@ -6,7 +6,7 @@ WantedBy=default.target
 
 [Service]
 Type=notify
-TimeoutStartSec=10min
+TimeoutStartSec=20min
 TimeoutStopSec=10min
 Environment=PYTHONUNBUFFERED=1
 ExecStart=%h/python-crc-systemd/__main__.py start

@@ -28,15 +28,8 @@ class UserCrcRunner(ServiceInterface):
         self.bus = bus
         self.start_proc = start_proc
         self.start_task = asyncio.create_task(start_proc.wait())
-        self.monitor_task = None
+        self.monitor = crc.CrcMonitor(POLL_INTERVAL_SECONDS)
         self.stop_proc = None
-
-    # async def start(self):
-    #     Notify.notify(status="Starting CRC instance")
-    #     self.start_proc = await crc.start()
-    #     # match await start.wait():
-    #     #     case 0:
-    #     #         Notify.ready(status="CRC Started")
 
     @method()
     async def stop(self):
@@ -185,7 +178,6 @@ async def start():
     runner = UserCrcRunner(bus, await crc.start())
     bus.export("/fyi/kmg/crc_runner/Runner1", runner)
     await bus.request_name("fyi.kmg.crc_runner")
-    asyncio.create_task(crc.monitor(POLL_INTERVAL_SECONDS))
     await runner()
 
 
