@@ -1,5 +1,6 @@
 [Unit]
 Description="CodeReady Containers"
+Requires=crc-log.service
 
 [Install]
 WantedBy=default.target
@@ -8,8 +9,11 @@ WantedBy=default.target
 Type=notify
 TimeoutStartSec=20min
 TimeoutStopSec=10min
+
 Environment=PYTHONUNBUFFERED=1
+
 ExecStart=%h/python-crc-systemd/__main__.py start
+
 ExecStop=busctl --user --timeout=10min call \
     fyi.kmg.crc_runner \
     /fyi/kmg/crc_runner/Runner1 \

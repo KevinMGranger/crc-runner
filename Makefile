@@ -1,5 +1,6 @@
 install:
-	cp crc.service ~/.config/systemd/user/crc.service
+	cp crc-user.service ~/.config/systemd/user/crc.service
+	cp crc-log.service ~/.config/systemd/user/crc-log.service
 	systemctl --user daemon-reload
 
 sysinstall:

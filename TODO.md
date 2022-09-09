@@ -1,8 +1,3 @@
-- forward logs from user service to system service?
-    - I was thinking this would lose us the process name, but it turns out we already don't have that
-        - (well, let's double verify that in the verbose format)
-    - gotta test setting the process PID in the log
-    - this isn't actually necessary. we don't need to watchdog tbh
 - document everything
 - should system runner and user runner work more similarly for monitoring? Am I doing cancellation and disconnection correctly?
     - well they _are_ different. one wants to keep putting crc status out there but the other does polling when trying to stop.

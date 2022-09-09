@@ -1,0 +1,9 @@
+[Unit]
+Description="CRC Log Forwarder"
+
+[Service]
+Type=simple
+
+ExecStartPre=touch %h/.crc/crc.log
+
+ExecStart=systemd-cat tail -f %h/.crc/crc.log
