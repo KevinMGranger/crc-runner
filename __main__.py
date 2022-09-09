@@ -30,7 +30,7 @@ class UserCrcRunner(ServiceInterface):
         self.start_task = asyncio.create_task(start_proc.wait())
         self.monitor = crc.CrcMonitor(POLL_INTERVAL_SECONDS)
         self.stop_proc = None
-
+    
     @method()
     async def stop(self):
         Notify.stopping()
@@ -52,15 +52,13 @@ class UserCrcRunner(ServiceInterface):
         await self.stop_proc.wait()
 
     async def __call__(self):
-        # TODO: can crc start fail but still have the vm running?
-        # crc stop will "work" even if it's already stopped.
-        # it'll return 1, but we can ignore that since we're
-        # already in a defacto
-        # error handler / exception handler / destructor
         try:
             returncode = await check_signal(self.start_task)
 
             if returncode == 0:
+                # wait for successful status
+                print("Waiting for CRC to successfuly start")
+                await self.monitor.ready.wait()
                 Notify.ready("CRC Started")
             else:
                 raise subprocess.CalledProcessError(returncode, "crc start")
@@ -73,8 +71,6 @@ class UserCrcRunner(ServiceInterface):
             else:
                 sys.exit(start_returncode)
         except CancelledError:
-            # can only come from the start task being cancelled,
-            # perhaps by close()
             self.stop_proc = await crc.stop()
             await self.stop_proc.wait()
 
