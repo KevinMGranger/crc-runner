@@ -50,11 +50,7 @@ class StatusOutput:
 
     @property
     def ready(self) -> bool:
-        match (self.crc_status, self.openshift_status):
-            case (CrcStatus.running, OpenShiftStatus.running):
-                return True
-            case _:
-                return False
+        return (self.crc_status, self.openshift_status) == (CrcStatus.running, OpenShiftStatus.running)
 
     @property
     def notify_status(self) -> str:
@@ -62,14 +58,15 @@ class StatusOutput:
 
 
 class CrcMonitor:
-    interval: float
-    last_status: StatusOutput | None
-    monitor_task: asyncio.Task[None]
+    # interval: float
+    # last_status: StatusOutput | None
+    # monitor_task: asyncio.Task[None]
 
     def __init__(self, interval: float):
         self.interval = interval
-        self.last_status = None
+        self.last_status : StatusOutput | None = None
         self.monitor_task = asyncio.create_task(self._monitor())
+        self.ready = asyncio.Event()
 
     # todo: wait did this even need to be cancellable?
     def cancel(self, msg=None):
@@ -80,6 +77,8 @@ class CrcMonitor:
             journal.send("Running crc status check", PRIORITY=syslog.LOG_DEBUG)
             self.last_status = await status()
             print(datetime.datetime.now(), self.last_status)
+            if self.last_status.ready:
+                self.ready.set() # go
             await asyncio.sleep(self.interval)
 
 async def monitor_generator() -> AsyncIterator[StatusOutput]:
