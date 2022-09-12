@@ -23,7 +23,7 @@ def clean_download_dir(c):
     shutil.rmtree(CRC_DOWNLOADED_DIR)
 
 @task
-def crc_setup(c):
+def crc_setup(c, verbose=False):
     if CRC_DOWNLOADED_BIN.exists():
         crc_bin = CRC_DOWNLOADED_BIN
     elif CRC_LOCAL_BIN.exists():
@@ -39,7 +39,8 @@ def crc_setup(c):
 
     c.run(f"{crc_bin} config set memory {memory}")
     c.run(f"{crc_bin} config set disk-size 64")
-    c.run(f"{crc_bin} setup", pty=True)
+    log = "--log-level 9" if verbose else ""
+    c.run(f"{crc_bin} setup {log}", pty=True)
 
     # overwrite symlink with actual binary
     if CRC_LOCAL_BIN.resolve() == CRC_DOWNLOADED_BIN.resolve():
