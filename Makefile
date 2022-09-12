@@ -24,5 +24,3 @@ sysstat:
 format:
 	black __main__.py crc_systemd
 	isort __main__.py crc_systemd
-
-
