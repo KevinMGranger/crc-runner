@@ -5,7 +5,6 @@ import signal
 from typing import TypeVar, Any
 
 
-
 class _SignalListenerMap(UserDict[int, asyncio.Event]):
     def handle(self):
         for event in self.data.values():
@@ -54,8 +53,7 @@ async def check_signal(
     signal: signal.Signals,
 ) -> T:
     """
-    Run a coroutine, throwing an exception if
-    a signal is recieved while doing so.
+    Run a coroutine, raising an exception if a signal is recieved while doing so.
     """
 
     match awaitable:
@@ -68,13 +66,17 @@ async def check_signal(
         case _:
             raise TypeError("awaitable must be a coroutine or task")
 
+    task_id = id(awaitable_task)
     signal_listener_map = _SIGNAL_MAP.listener_map_for(signal)
-    event = signal_listener_map[id(awaitable_task)]
+    event = signal_listener_map[task_id]
     event_task = asyncio.create_task(event.wait())
 
     done, _pending = await asyncio.wait(
         (event_task, awaitable_task), return_when=asyncio.FIRST_COMPLETED
     )
+
+    del signal_listener_map[task_id]
+
     if event_task in done:
         raise SignalError(signal=signal)
     elif awaitable_task in done:
