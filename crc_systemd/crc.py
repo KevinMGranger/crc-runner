@@ -6,9 +6,9 @@ import enum
 import json
 import pathlib
 import syslog
-from typing import AsyncIterable, AsyncIterator
+import logging
 
-from systemd import journal
+log = logging.getLogger(__name__)
 
 CRC_PATH = pathlib.Path.home() / ".crc/bin/crc"
 CRC_START_ARGS = ["start"]
@@ -84,9 +84,9 @@ class CrcMonitor:
 
     async def _monitor(self):
         while True:
-            journal.send("Running crc status check", PRIORITY=syslog.LOG_DEBUG)
+            log.debug("Running crc status check")
             self.last_status = await status()
-            print(datetime.datetime.now(), self.last_status)
+            log.info(self.last_status)
             if self.last_status.ready:
                 self.ready.set()  # go
             await asyncio.sleep(self.interval)
