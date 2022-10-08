@@ -46,6 +46,7 @@ class UserCrcRunner(ServiceInterface):
                         Notify.notify("Stopping start task")
                     # do this regardless to avoid race condition
                     # TODO: (what was that about? I don't understand)
+                    # is it something to do with the dbus case versus signal case?
                     self.start_task.cancel(msg="Stopping start_task from stop()")
 
                 case SpawningStop(spawn_task):
@@ -60,26 +61,21 @@ class UserCrcRunner(ServiceInterface):
 
     async def __call__(self):
         try:
+            # TODO: this could totally be a context manager
             returncode = await check_signal(self.start_task, SIGTERM)
             if returncode != 0:
                 raise subprocess.CalledProcessError(returncode, "crc start")
+
+            # wait for successful status
+            print("Waiting for CRC to successfuly start")
+            await check_signal(self.monitor.ready.wait(), SIGTERM)
+            Notify.ready("CRC Started")
         except SignalError as e:
-            # TODO: try to forcibly stop if not done yet?
-            # would schedule the stop task here.
-            start_returncode = await self.start_task
-            if start_returncode == 0:
-                self.stop_proc = await crc.stop()
-                await self.stop_proc.wait()
-                sys.exit(128 + e.signal.value)
-            else:
-                sys.exit(start_returncode)
+            print("Got SIGTERM, stopping CRC")
+            await self.stop()
+            sys.exit(128 + e.signal.value)
         except CancelledError:
             await self.stop()
-
-        # wait for successful status
-        print("Waiting for CRC to successfuly start")
-        await self.monitor.ready.wait()
-        Notify.ready("CRC Started")
 
         await self.bus.wait_for_disconnect()
 
