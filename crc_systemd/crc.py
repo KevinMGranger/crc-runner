@@ -1,5 +1,6 @@
 import asyncio
 import asyncio.subprocess
+from dataclasses import dataclass
 import datetime
 import enum
 import json
@@ -91,11 +92,6 @@ class CrcMonitor:
             await asyncio.sleep(self.interval)
 
 
-async def monitor_generator() -> AsyncIterator[StatusOutput | NotYetExtant]:
-    while True:
-        yield await status()
-
-
 async def start() -> asyncio.subprocess.Process:
     return await asyncio.create_subprocess_exec(CRC_PATH, *CRC_START_ARGS)
 
@@ -113,3 +109,13 @@ async def status() -> StatusOutput | NotYetExtant:
 
 async def stop() -> asyncio.subprocess.Process:
     return await asyncio.create_subprocess_exec(CRC_PATH, *CRC_STOP_ARGS)
+
+
+@dataclass(frozen=True)
+class SpawningStop:
+    task: asyncio.Task[asyncio.subprocess.Process]
+
+
+@dataclass(frozen=True)
+class Stopping:
+    task: asyncio.Task[int]

@@ -2,17 +2,20 @@
 import asyncio
 import asyncio.subprocess as aproc
 import datetime
+from signal import SIGINT, SIGTERM
 import subprocess
 import sys
 import syslog
 from asyncio import CancelledError
+from typing import Any, Coroutine
 
 from dbus_next.aio import MessageBus, ProxyObject
 from dbus_next.service import ServiceInterface, method
 from systemd import journal
 
 from crc_systemd import crc, dbus, systemd
-from crc_systemd.async_helpers import SigTermError, check_signal
+from crc_systemd.crc import SpawningStop, Stopping
+from crc_systemd.async_helpers import SignalError, check_signal
 from crc_systemd.dbus import make_proxy
 from crc_systemd.systemd import Notify, UnitActiveState
 
@@ -21,7 +24,6 @@ POLL_INTERVAL_SECONDS = 6
 
 class UserCrcRunner(ServiceInterface):
     "Starts and monitors CRC, reacting to a stop request by shutting it down."
-    stop_proc: aproc.Process | None
 
     def __init__(self, bus: MessageBus, start_proc: aproc.Process):
         super().__init__("fyi.kmg.crc_runner.Runner1")
@@ -29,40 +31,41 @@ class UserCrcRunner(ServiceInterface):
         self.start_proc = start_proc
         self.start_task = asyncio.create_task(start_proc.wait())
         self.monitor = crc.CrcMonitor(POLL_INTERVAL_SECONDS)
-        self.stop_proc = None
-    
+        self.stop_state: SpawningStop | Stopping | None = None
+
     @method()
     async def stop(self):
-        Notify.stopping()
+        while True:
+            match self.stop_state:
+                case None:
+                    self.stop_state = SpawningStop(asyncio.create_task(crc.stop()))
+                    # here just in case it throws, so the stop task can still start
+                    Notify.stopping()
 
-        # this will not be called if still starting!
-        # We will get a signal instead,
-        # so we don't need to wait as long as we notify correctly
+                    if not self.start_task.done():
+                        Notify.notify("Stopping start task")
+                    # do this regardless to avoid race condition
+                    # TODO: (what was that about? I don't understand)
+                    self.start_task.cancel(msg="Stopping start_task from stop()")
 
-        if not self.start_task.done():
-            Notify.notify("Stopping start task")
-        # do this regardless to avoid race condition
-        self.start_task.cancel(msg="Stopping start_task from stop()")
-        try:
-            await self.start_task
-        except CancelledError:
-            pass
+                case SpawningStop(spawn_task):
+                    proc = await spawn_task
+                    # see if this was already set while awaiting (from another call)
+                    if not isinstance(self.stop_state, Stopping):
+                        self.stop_state = Stopping(asyncio.create_task(proc.wait()))
 
-        self.stop_proc = await crc.stop()
-        await self.stop_proc.wait()
+                case Stopping(stop_task):
+                    await stop_task
+                    return
 
     async def __call__(self):
         try:
-            returncode = await check_signal(self.start_task)
-
-            if returncode == 0:
-                # wait for successful status
-                print("Waiting for CRC to successfuly start")
-                await self.monitor.ready.wait()
-                Notify.ready("CRC Started")
-            else:
+            returncode = await check_signal(self.start_task, SIGTERM)
+            if returncode != 0:
                 raise subprocess.CalledProcessError(returncode, "crc start")
-        except SigTermError as e:
+        except SignalError as e:
+            # TODO: try to forcibly stop if not done yet?
+            # would schedule the stop task here.
             start_returncode = await self.start_task
             if start_returncode == 0:
                 self.stop_proc = await crc.stop()
@@ -71,8 +74,12 @@ class UserCrcRunner(ServiceInterface):
             else:
                 sys.exit(start_returncode)
         except CancelledError:
-            self.stop_proc = await crc.stop()
-            await self.stop_proc.wait()
+            await self.stop()
+
+        # wait for successful status
+        print("Waiting for CRC to successfuly start")
+        await self.monitor.ready.wait()
+        Notify.ready("CRC Started")
 
         await self.bus.wait_for_disconnect()
 
@@ -82,6 +89,7 @@ class SystemCrcUserRunner(ServiceInterface):
     Starts and watches the user-level CRC service.
     Meant to be paired with a system-level HAProxy.
     """
+
     def __init__(self, bus: MessageBus, systemd_prox: ProxyObject):
         self.bus = bus
         self.systemd_prox = systemd_prox
