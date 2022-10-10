@@ -2,6 +2,7 @@
 import asyncio
 import asyncio.subprocess as aproc
 import datetime
+import logging
 from signal import SIGINT, SIGTERM
 import subprocess
 import sys
@@ -20,6 +21,8 @@ from crc_systemd.dbus import make_proxy
 from crc_systemd.systemd import Notify, UnitActiveState
 
 POLL_INTERVAL_SECONDS = 6
+
+log = logging.getLogger(__name__)
 
 
 class UserCrcRunner(ServiceInterface):
@@ -64,7 +67,9 @@ class UserCrcRunner(ServiceInterface):
             # TODO: this could totally be a context manager
             returncode = await check_signal(self.start_task, SIGTERM)
             if returncode != 0:
-                raise subprocess.CalledProcessError(returncode, "crc start")
+                output = str(await self.start_proc.stdout.read())  # type: ignore
+                log.error(output)
+                raise subprocess.CalledProcessError(returncode, "crc start", output)
 
             # wait for successful status
             print("Waiting for CRC to successfuly start")
@@ -175,6 +180,9 @@ async def start():
     print("Starting CRC instance")
     # TODO: race condition if crc is started before runner()
     # listens for cancellation
+    # could just use the state pattern I did for stopping
+    # wait when would this happen? is this outdated?
+
     runner = UserCrcRunner(bus, await crc.start())
     bus.export("/fyi/kmg/crc_runner/Runner1", runner)
     await bus.request_name("fyi.kmg.crc_runner")

@@ -1,3 +1,4 @@
+from __future__ import annotations
 import asyncio
 import asyncio.subprocess
 from dataclasses import dataclass
@@ -5,7 +6,6 @@ import datetime
 import enum
 import json
 import pathlib
-import syslog
 import logging
 
 log = logging.getLogger(__name__)
@@ -14,6 +14,8 @@ CRC_PATH = pathlib.Path.home() / ".crc/bin/crc"
 CRC_START_ARGS = ["start"]
 CRC_STATUS_ARGS = ["status", "-o", "json"]
 CRC_STOP_ARGS = ["stop"]
+
+OTHER_ERROR_START = "Cannot get machine state"
 
 # TODO: polling status may not be necessary?
 # seemed to not be while testing but I swear I've seen relying on crc start not be enough.
@@ -42,6 +44,16 @@ class NotYetExtant:
     @staticmethod
     def __str__():
         return NotYetExtant.MESSAGE
+
+
+class OtherError:
+    ready = False
+
+    def __init__(self, error: str):
+        self.error = error
+
+    def __str__(self):
+        return self.error
 
 
 class StatusOutput:
@@ -74,7 +86,7 @@ class StatusOutput:
 class CrcMonitor:
     def __init__(self, interval: float):
         self.interval = interval
-        self.last_status: StatusOutput | NotYetExtant | None = None
+        self.last_status: StatusOutput | NotYetExtant | OtherError | None = None
         self.monitor_task = asyncio.create_task(self._monitor())
         self.ready = asyncio.Event()
 
@@ -93,18 +105,28 @@ class CrcMonitor:
 
 
 async def start() -> asyncio.subprocess.Process:
-    return await asyncio.create_subprocess_exec(CRC_PATH, *CRC_START_ARGS)
+    return await asyncio.create_subprocess_exec(CRC_PATH, *CRC_START_ARGS, stdout=asyncio.subprocess.PIPE)
 
 
-async def status() -> StatusOutput | NotYetExtant:
+async def status() -> StatusOutput | NotYetExtant | OtherError:
     status_proc = await asyncio.create_subprocess_exec(
         CRC_PATH, *CRC_STATUS_ARGS, stdout=asyncio.subprocess.PIPE
     )
     stdout_bytes = await status_proc.stdout.read()  # type: ignore
     output = json.loads(stdout_bytes)
-    if not output["success"] and output["error"] == NotYetExtant.MESSAGE:
-        return NotYetExtant(datetime.datetime.now())
-    return StatusOutput(**output, timestamp=datetime.datetime.now())
+
+    match output:
+        case {
+            "success": False,
+            "error": str() as error,
+        } if error == NotYetExtant.MESSAGE:
+            return NotYetExtant(datetime.datetime.now())
+        case {"success": False, "error": str() as error}:
+            return OtherError(error)
+        case {"success": True}:
+            return StatusOutput(**output, timestamp=datetime.datetime.now())
+        case _:
+            raise Exception(f"Unknown output status: {output}")
 
 
 async def stop() -> asyncio.subprocess.Process:
