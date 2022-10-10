@@ -178,11 +178,6 @@ async def start():
     print("Connecting to dbus", flush=True)
     bus = await dbus.connect()
     print("Starting CRC instance")
-    # TODO: race condition if crc is started before runner()
-    # listens for cancellation
-    # could just use the state pattern I did for stopping
-    # wait when would this happen? is this outdated?
-
     runner = UserCrcRunner(bus, await crc.start())
     bus.export("/fyi/kmg/crc_runner/Runner1", runner)
     await bus.request_name("fyi.kmg.crc_runner")
