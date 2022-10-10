@@ -45,11 +45,10 @@ class UserCrcRunner(ServiceInterface):
                     # here just in case it throws, so the stop task can still start
                     Notify.stopping()
 
-                    if not self.start_task.done():
-                        Notify.notify("Stopping start task")
-                    # do this regardless to avoid race condition
-                    # TODO: (what was that about? I don't understand)
-                    # is it something to do with the dbus case versus signal case?
+                    # do this regardless to avoid race condition:
+                    # time between check and use
+                    # (although does this even signal it? Does it even need to?)
+                    Notify.notify("Stopping start task")
                     self.start_task.cancel(msg="Stopping start_task from stop()")
 
                 case SpawningStop(spawn_task):
