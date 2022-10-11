@@ -36,8 +36,12 @@ class UserCrcRunner(ServiceInterface):
         self.monitor = crc.CrcMonitor(POLL_INTERVAL_SECONDS)
         self.stop_state: SpawningStop | Stopping | None = None
 
-    @method()
-    async def stop(self):
+    @method(name="stop")
+    async def dbus_stop(self):
+        await self.stop("dbus")
+
+    async def stop(self, source: str):
+        log.info(f"Stopping from {source}")
         while True:
             match self.stop_state:
                 case None:
@@ -48,7 +52,7 @@ class UserCrcRunner(ServiceInterface):
                     # do this regardless to avoid race condition:
                     # time between check and use
                     # (although does this even signal it? Does it even need to?)
-                    Notify.notify("Stopping start task")
+                    log.info("Cancelling start task")
                     self.start_task.cancel(msg="Stopping start_task from stop()")
 
                 case SpawningStop(spawn_task):
@@ -58,7 +62,9 @@ class UserCrcRunner(ServiceInterface):
                         self.stop_state = Stopping(asyncio.create_task(proc.wait()))
 
                 case Stopping(stop_task):
+                    log.info("Waiting on stop command")
                     await stop_task
+                    self.bus.disconnect()
                     return
 
     async def __call__(self):
@@ -71,16 +77,18 @@ class UserCrcRunner(ServiceInterface):
                 raise subprocess.CalledProcessError(returncode, "crc start", output)
 
             # wait for successful status
-            print("Waiting for CRC to successfuly start")
+            log.info("Waiting for CRC to successfuly start")
             await check_signal(self.monitor.ready.wait(), SIGTERM)
             Notify.ready("CRC Started")
         except SignalError as e:
-            print("Got SIGTERM, stopping CRC")
-            await self.stop()
+            log.info("Got SIGTERM, stopping CRC")
+            await self.stop("SIGTERM")
             sys.exit(128 + e.signal.value)
         except CancelledError:
-            await self.stop()
+            log.info("Cancelled, stopping")
+            await self.stop("cancellation")
 
+        log.debug("Disconnecting from bus")
         await self.bus.wait_for_disconnect()
 
 
