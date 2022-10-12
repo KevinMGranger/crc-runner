@@ -87,6 +87,7 @@ class CrcMonitor:
     def __init__(self, interval: float):
         self.interval = interval
         self.last_status: StatusOutput | NotYetExtant | OtherError | None = None
+        log.debug("Creating monitor")
         self.monitor_task = asyncio.create_task(self._monitor())
         self.ready = asyncio.Event()
 
@@ -95,6 +96,7 @@ class CrcMonitor:
         self.monitor_task.cancel(msg)
 
     async def _monitor(self):
+        log.debug("Starting monitor loop")
         while True:
             log.debug("Running crc status check")
             self.last_status = await status()
