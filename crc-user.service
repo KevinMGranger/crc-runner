@@ -13,9 +13,3 @@ TimeoutStopSec=10min
 Environment=PYTHONUNBUFFERED=1
 
 ExecStart=%h/python-crc-systemd/__main__.py start
-
-ExecStop=busctl --user --timeout=10min call \
-    fyi.kmg.crc_runner \
-    /fyi/kmg/crc_runner/Runner1 \
-    fyi.kmg.crc_runner.Runner1 \
-    stop

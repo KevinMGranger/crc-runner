@@ -16,31 +16,50 @@ from systemd import journal
 
 from crc_systemd import crc, dbus, systemd
 from crc_systemd.crc import SpawningStop, Stopping
-from crc_systemd.async_helpers import SignalError, check_signal
-from crc_systemd.dbus import make_proxy
+from crc_systemd.async_helpers import (
+    SignalError,
+    check_signal,
+    distinguish_cancellation,
+    CancelledFromInside,
+    CancelledFromOutside,
+)
+from crc_systemd.dbus import bus_connection, make_proxy
 from crc_systemd.systemd import Notify, UnitActiveState
 
 POLL_INTERVAL_SECONDS = 6
 
 log = logging.getLogger(__name__)
 
+CANCELLED_FROM_STOP_CALL = "cancelled from dbus stop"
+CANCELLED_FROM_SIGNAL = "cancelled from signal"
+
+STOPPING_FROM_DBUS = "dbus"
+STOPPING_FROM_SIGNAL = "SIGTERM"
+STOPPING_FROM_CANCELLATION = "cancellation"
+
+# TODO: if we have a signal handler, do we really need dbus?
+
 
 class UserCrcRunner(ServiceInterface):
     "Starts and monitors CRC, reacting to a stop request by shutting it down."
 
-    def __init__(self, bus: MessageBus, start_proc: aproc.Process):
+    def __init__(self, start_proc: aproc.Process):
         super().__init__("fyi.kmg.crc_runner.Runner1")
-        self.bus = bus
         self.start_proc = start_proc
-        self.start_task = asyncio.create_task(start_proc.wait())
+        self.start_crc_exec_task = asyncio.create_task(start_proc.wait())
         self.monitor = crc.CrcMonitor(POLL_INTERVAL_SECONDS)
         self.stop_state: SpawningStop | Stopping | None = None
-
-    @method(name="stop")
-    async def dbus_stop(self):
-        await self.stop("dbus")
+        self.stop_task: asyncio.Task | None = None
 
     async def stop(self, source: str):
+        if self.stop_task is None:
+            self.stop_task = asyncio.create_task(self._stop(source))
+        else:
+            log.info("Asked to stop from %s but already stopping", source)
+
+        return await self.stop_task
+
+    async def _stop(self, source: str):
         log.info(f"Stopping from {source}")
         while True:
             match self.stop_state:
@@ -49,11 +68,10 @@ class UserCrcRunner(ServiceInterface):
                     # here just in case it throws, so the stop task can still start
                     Notify.stopping()
 
-                    # do this regardless to avoid race condition:
-                    # time between check and use
-                    # (although does this even signal it? Does it even need to?)
                     log.info("Cancelling start task")
-                    self.start_task.cancel(msg="Stopping start_task from stop()")
+                    self.start_crc_exec_task.cancel(
+                        msg="Stopping start_task from stop()"
+                    )
 
                 case SpawningStop(spawn_task):
                     proc = await spawn_task
@@ -64,32 +82,47 @@ class UserCrcRunner(ServiceInterface):
                 case Stopping(stop_task):
                     log.info("Waiting on stop command")
                     await stop_task
-                    self.bus.disconnect()
                     return
 
-    async def __call__(self):
+    async def start(self):
         try:
-            # TODO: this could totally be a context manager
-            returncode = await check_signal(self.start_task, SIGTERM)
+            # wait for start
+            returncode = await distinguish_cancellation(
+                check_signal(self.start_crc_exec_task, SIGTERM)
+            )
             if returncode != 0:
+                # TODO: could deadlock if buffer fills and process can't exit until written
                 output = str(await self.start_proc.stdout.read())  # type: ignore
                 log.error(output)
                 raise subprocess.CalledProcessError(returncode, "crc start", output)
+        except CancelledFromOutside:
+            log.info("start was cancelled, when would this happen though?")
+            raise CancelledError
+        except CancelledFromInside:
+            log.info("start_exec was cancelled, must be from stopping")
+            await self.stop_task  # type: ignore # TODO: can we make some guarantees here?
+            raise CancelledError
+        except CancelledError as e:
+            log.info("Cancelled, stopping")
+            await self.stop(STOPPING_FROM_CANCELLATION)
+            raise
+        except SignalError as e:
+            log.info("Got SIGTERM, stopping CRC")
+            await self.stop(STOPPING_FROM_SIGNAL)
+            sys.exit(128 + e.signal.value)
 
+        try:
             # wait for successful status
             log.info("Waiting for CRC to successfuly start")
             await check_signal(self.monitor.ready.wait(), SIGTERM)
             Notify.ready("CRC Started")
         except SignalError as e:
             log.info("Got SIGTERM, stopping CRC")
-            await self.stop("SIGTERM")
+            await self.stop(STOPPING_FROM_SIGNAL)
             sys.exit(128 + e.signal.value)
-        except CancelledError:
-            log.info("Cancelled, stopping")
-            await self.stop("cancellation")
 
-        log.debug("Disconnecting from bus")
-        await self.bus.wait_for_disconnect()
+    async def wait_until_stopped(self):
+        await self.monitor.stopped.wait()
 
 
 class SystemCrcUserRunner(ServiceInterface):
@@ -182,13 +215,10 @@ class SystemCrcUserRunner(ServiceInterface):
 
 
 async def start():
-    print("Connecting to dbus", flush=True)
-    bus = await dbus.connect()
     print("Starting CRC instance")
-    runner = UserCrcRunner(bus, await crc.start())
-    bus.export("/fyi/kmg/crc_runner/Runner1", runner)
-    await bus.request_name("fyi.kmg.crc_runner")
-    await runner()
+    runner = UserCrcRunner(await crc.start())
+    await runner.start()
+    await runner.wait_until_stopped()
 
 
 async def system_start():
