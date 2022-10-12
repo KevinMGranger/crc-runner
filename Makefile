@@ -1,10 +1,10 @@
 install:
-	cp crc-user.service ~/.config/systemd/user/crc.service
-	cp crc-log.service ~/.config/systemd/user/crc-log.service
+	cp systemd/crc-user.service ~/.config/systemd/user/crc.service
+	cp systemd/crc-log.service ~/.config/systemd/user/crc-log.service
 	systemctl --user daemon-reload
 
 sysinstall:
-	sudo sh -c "cp crc-system.service /etc/systemd/system/crc.service && cp __main__.py /usr/local/bin/python-crc-systemd && systemctl daemon-reload"
+	sudo sh -c "cp systemd/crc-system.service /etc/systemd/system/crc.service && cp crc_systemd/__main__.py /usr/local/bin/python-crc-systemd && systemctl daemon-reload"
 
 ustart:
 	systemctl --user start crc.service
@@ -22,5 +22,5 @@ sysstat:
 	systemctl status crc
 
 format:
-	black __main__.py crc_systemd
-	isort __main__.py crc_systemd
+	black crc_systemd
+	isort crc_systemd
