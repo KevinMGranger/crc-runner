@@ -46,7 +46,7 @@ Coordinates this with a system-level service, so that haproxy can be started onc
 # %%systemd_user_post crc.service
 # %%systemd_user_post crc-log.service
 
-%files
+%files -f %{pyproject_files}
 
 
 
