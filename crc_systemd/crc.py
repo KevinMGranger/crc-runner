@@ -127,7 +127,7 @@ class CrcMonitor:
     async def _check_single_status(self):
         log.debug("Running crc status check")
         self.last_status = await status()
-        log.info(self.lifecycle, self.last_status)
+        log.info("Got lifecycle %s, status %s", self.lifecycle, self.last_status)
         if not isinstance(self.last_status, StatusOutput):
             return
 
