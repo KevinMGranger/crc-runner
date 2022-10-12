@@ -7,8 +7,8 @@ from signal import SIGINT, SIGTERM
 import subprocess
 import sys
 import syslog
-from asyncio import CancelledError
-from typing import Any, Coroutine
+from asyncio import CancelledError, StreamReader
+from typing import Any, Coroutine, cast
 
 from dbus_next.aio import MessageBus, ProxyObject
 from dbus_next.service import ServiceInterface, method
@@ -42,16 +42,45 @@ STOPPING_FROM_CANCELLATION = "cancellation"
 # TODO: if we have a signal handler, do we really need dbus?
 
 
-class UserCrcRunner(ServiceInterface):
+class MismatchedBundleError(Exception):
+    ERROR_MESSAGE_SUBSTRING = "was requested, but the existing VM is using"
+
+    def __init__(self, line_task: asyncio.Task | None = None):
+        super().__init__()
+        self.line_task = line_task
+
+
+class UserCrcRunner:
     "Starts and monitors CRC, reacting to a stop request by shutting it down."
 
-    def __init__(self, start_proc: aproc.Process):
-        super().__init__("fyi.kmg.crc_runner.Runner1")
-        self.start_proc = start_proc
-        self.start_crc_exec_task = asyncio.create_task(start_proc.wait())
+    def __init__(self):
         self.monitor = crc.CrcMonitor(POLL_INTERVAL_SECONDS)
         self.stop_state: SpawningStop | Stopping | None = None
         self.stop_task: asyncio.Task | None = None
+        self.start_proc: aproc.Process = None  # type: ignore
+        self.start_task = asyncio.create_task(self._crc_start())
+
+    async def _line_reader(self, stderr: StreamReader, suppress: bool):
+        while line := str(await stderr.readline()):
+            print(line)
+            if MismatchedBundleError.ERROR_MESSAGE_SUBSTRING in line and not suppress:
+                raise MismatchedBundleError
+
+    async def _crc_start(self):
+        self.start_proc = proc = await crc.start()
+        stderr = cast(StreamReader, proc.stderr)
+        try:
+            await self._line_reader(stderr, suppress=False)
+            returncode = await proc.wait()
+            if returncode != 0:
+                log.error("`crc start` had exit status %s", returncode)
+                # apparently it can exit with a failure but still have started
+                # raise subprocess.CalledProcessError(returncode, "crc start", output)
+        except MismatchedBundleError:
+            proc.terminate()
+            # continue to drain and print until exited
+            _task = asyncio.create_task(self._line_reader(stderr, suppress=True))
+            raise MismatchedBundleError(_task)
 
     async def stop(self, source: str):
         if self.stop_task is None:
@@ -71,9 +100,7 @@ class UserCrcRunner(ServiceInterface):
                     Notify.stopping()
 
                     log.info("Cancelling start task")
-                    self.start_crc_exec_task.cancel(
-                        msg="Stopping start_task from stop()"
-                    )
+                    self.start_task.cancel(msg="Stopping start_task from stop()")
 
                 case SpawningStop(spawn_task):
                     proc = await spawn_task
@@ -89,19 +116,19 @@ class UserCrcRunner(ServiceInterface):
     async def start(self):
         try:
             # wait for start
-            returncode = await distinguish_cancellation(
-                check_signal(self.start_crc_exec_task, SIGTERM)
-            )
-            if returncode != 0:
-                # TODO: could deadlock if buffer fills and process can't exit until written
-                output = str(await self.start_proc.stdout.read())  # type: ignore
-                log.error("`crc start` had exit status %s: %s", returncode, output)
-                # apparently it can exit with a failure but still have started
-                # raise subprocess.CalledProcessError(returncode, "crc start", output)
+            await distinguish_cancellation(check_signal(self.start_task, SIGTERM))
+        except MismatchedBundleError as e:
+            Notify.notify("Bundle version mismatch")
+            # TODO: this is all messy, spoopy action at a distance
+            lines = cast(asyncio.Task, e.line_task)
+            await lines
+            retcode = await self.start_proc.wait()
+            sys.exit(retcode)
         except CancelledFromOutside:
             log.info("start was cancelled, when would this happen though?")
             raise CancelledError
         except CancelledFromInside:
+            # this also wouldn't happen, right? now that dbus is gone?
             log.info("start_exec was cancelled, must be from stopping")
             await self.stop_task  # type: ignore # TODO: can we make some guarantees here?
             raise CancelledError
@@ -225,7 +252,7 @@ class SystemCrcUserRunner(ServiceInterface):
 
 async def start():
     print("Starting CRC instance")
-    runner = UserCrcRunner(await crc.start())
+    runner = UserCrcRunner()
     await runner.start()
     await runner.wait_until_stopped()
 

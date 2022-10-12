@@ -166,7 +166,9 @@ class CrcMonitor:
 
 async def start() -> asyncio.subprocess.Process:
     return await asyncio.create_subprocess_exec(
-        CRC_PATH, *CRC_START_ARGS, stdout=asyncio.subprocess.PIPE
+        CRC_PATH,
+        *CRC_START_ARGS,
+        stderr=asyncio.subprocess.PIPE,
     )
 
 
