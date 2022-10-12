@@ -129,7 +129,7 @@ class UserCrcRunner:
         except SignalError as e:
             log.info("Got SIGTERM, stopping CRC")
             await self.stop(STOPPING_FROM_SIGNAL)
-            sys.exit(128 + e.signal.value)
+            sys.exit()
 
         try:
             # wait for successful status
@@ -139,7 +139,7 @@ class UserCrcRunner:
         except SignalError as e:
             log.info("Got SIGTERM, stopping CRC")
             await self.stop(STOPPING_FROM_SIGNAL)
-            sys.exit(128 + e.signal.value)
+            sys.exit()
 
     async def wait_until_stopped(self):
         try:
@@ -148,7 +148,7 @@ class UserCrcRunner:
             log.info("Got SIGTERM, stopping CRC")
             await self.stop(STOPPING_FROM_SIGNAL)
             await self.monitor.stopped.wait()
-            sys.exit(128 + e.signal.value)
+            sys.exit()
 
 
 async def run():
