@@ -1,4 +1,7 @@
+- embed git version or something
+
 - document everything
+
 - should system runner and user runner work more similarly for monitoring? Am I doing cancellation and disconnection correctly?
     - well they _are_ different. one wants to keep putting crc status out there but the other does polling when trying to stop.
     - could also connect to the runner directly and wait for a signal!
