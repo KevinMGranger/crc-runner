@@ -95,8 +95,9 @@ class UserCrcRunner(ServiceInterface):
             if returncode != 0:
                 # TODO: could deadlock if buffer fills and process can't exit until written
                 output = str(await self.start_proc.stdout.read())  # type: ignore
-                log.error(output)
-                raise subprocess.CalledProcessError(returncode, "crc start", output)
+                log.error("`crc start` had exit status %s: %s", returncode, output)
+                # apparently it can exit with a failure but still have started
+                # raise subprocess.CalledProcessError(returncode, "crc start", output)
         except CancelledFromOutside:
             log.info("start was cancelled, when would this happen though?")
             raise CancelledError
