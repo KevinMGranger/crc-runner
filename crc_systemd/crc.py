@@ -180,11 +180,11 @@ async def status() -> StatusOutput | NotYetExtant | OtherError:
             "success": False,
             "error": str() as error,
         } if error == NotYetExtant.MESSAGE:
-            return NotYetExtant(datetime.now())
+            return NotYetExtant()
         case {"success": False, "error": str() as error}:
             return OtherError(error)
         case {"success": True}:
-            return StatusOutput(**output, timestamp=datetime.now())
+            return StatusOutput(**output)
         case _:
             raise Exception(f"Unknown output status: {output}")
 
