@@ -34,6 +34,7 @@ log = logging.getLogger(__name__)
 CANCELLED_FROM_STOP_CALL = "cancelled from dbus stop"
 CANCELLED_FROM_SIGNAL = "cancelled from signal"
 
+# TODO: after removing dbus, do we need these different reasons? when would the user runner even be cancelled?
 STOPPING_FROM_DBUS = "dbus"
 STOPPING_FROM_SIGNAL = "SIGTERM"
 STOPPING_FROM_CANCELLATION = "cancellation"
@@ -123,7 +124,13 @@ class UserCrcRunner(ServiceInterface):
             sys.exit(128 + e.signal.value)
 
     async def wait_until_stopped(self):
-        await self.monitor.stopped.wait()
+        try:
+            await check_signal(self.monitor.stopped.wait(), SIGTERM)
+        except SignalError as e:
+            log.info("Got SIGTERM, stopping CRC")
+            await self.stop(STOPPING_FROM_SIGNAL)
+            await self.monitor.stopped.wait()
+            sys.exit(128 + e.signal.value)
 
 
 class SystemCrcUserRunner(ServiceInterface):
