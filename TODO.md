@@ -10,3 +10,5 @@
 - handle start correctly:
     - if already running via crc status, should just say "yeah it's up"! and skip start step
         - should separate start and wait tasks for this, back into separate functions
+
+- clean up logging format for systemd (seems like the info duplication is in the log tailer, right?)

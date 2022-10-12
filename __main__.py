@@ -23,6 +23,7 @@ from crc_systemd.async_helpers import (
     CancelledFromInside,
     CancelledFromOutside,
 )
+from crc_systemd.log import setup as setup_logging
 from crc_systemd.dbus import bus_connection, make_proxy
 from crc_systemd.systemd import Notify, UnitActiveState
 
@@ -242,6 +243,8 @@ async def log_statuses():
         print(datetime.datetime.now(), _status)
         await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
+
+setup_logging()
 
 match sys.argv[1]:
     case "log_statuses":
