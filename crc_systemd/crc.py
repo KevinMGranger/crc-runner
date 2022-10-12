@@ -57,16 +57,16 @@ class OtherError:
 
 
 class StatusOutput:
+    __match_args__ = ("crc_status", "openshift_status")
+
     def __init__(
         self,
         crcStatus: str,
         openshiftStatus: str,
-        timestamp: datetime.datetime,
         **_kwargs,
     ):
         self.crc_status = CrcStatus(crcStatus)
         self.openshift_status = OpenShiftStatus(openshiftStatus)
-        self.timestamp = timestamp
 
     def __str__(self) -> str:
         return f"crc={self.crc_status.value} openshift={self.openshift_status.value}"
@@ -83,31 +83,63 @@ class StatusOutput:
         return f"CRC is {self.crc_status.value}, OpenShift is {self.openshift_status.value}"
 
 
+class LifeCycleState(enum.Enum):
+    not_yet_started = enum.auto()
+    starting = enum.auto()
+    running = enum.auto()
+    stopped = enum.auto()
+
+
 class CrcMonitor:
     def __init__(self, interval: float):
         self.interval = interval
         self.last_status: StatusOutput | NotYetExtant | OtherError | None = None
+        self.lifecycle = LifeCycleState.not_yet_started
         log.debug("Creating monitor")
         self.monitor_task = asyncio.create_task(self._monitor())
         self.ready = asyncio.Event()
+        self.stopped = asyncio.Event()
 
     # todo: wait did this even need to be cancellable?
     def cancel(self, msg=None):
         self.monitor_task.cancel(msg)
 
+    async def _check_single_status(self):
+        log.debug("Running crc status check")
+        self.last_status = await status()
+        log.info(self.lifecycle, self.last_status)
+        match (self.lifecycle, self.last_status):
+            case _, StatusOutput() as last_status if last_status.ready:
+                self.lifecycle = LifeCycleState.running
+                self.ready.set()  # go
+            case LifeCycleState.not_yet_started, StatusOutput(
+                _, OpenShiftStatus.starting
+            ):
+                self.lifecycle = LifeCycleState.starting
+            case LifeCycleState.running, StatusOutput(CrcStatus.stopped, _):
+                self.lifecycle = LifeCycleState.stopped
+                self.stopped.set()
+            case _, OtherError() | NotYetExtant():
+                # :(
+                pass
+            case _:
+                log.error(
+                    "Unconsidered or illegal lifecycle-status combo %s %s",
+                    self.lifecycle,
+                    self.last_status,
+                )
+
     async def _monitor(self):
         log.debug("Starting monitor loop")
         while True:
-            log.debug("Running crc status check")
-            self.last_status = await status()
-            log.info(self.last_status)
-            if self.last_status.ready:
-                self.ready.set()  # go
+            await self._check_single_status()
             await asyncio.sleep(self.interval)
 
 
 async def start() -> asyncio.subprocess.Process:
-    return await asyncio.create_subprocess_exec(CRC_PATH, *CRC_START_ARGS, stdout=asyncio.subprocess.PIPE)
+    return await asyncio.create_subprocess_exec(
+        CRC_PATH, *CRC_START_ARGS, stdout=asyncio.subprocess.PIPE
+    )
 
 
 async def status() -> StatusOutput | NotYetExtant | OtherError:
