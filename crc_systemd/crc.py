@@ -2,7 +2,7 @@ from __future__ import annotations
 import asyncio
 import asyncio.subprocess
 from dataclasses import dataclass
-import datetime
+from datetime import datetime, timedelta
 import enum
 import json
 import pathlib
@@ -33,13 +33,13 @@ class OpenShiftStatus(enum.Enum):
     starting = "Starting"
     degraded = "Degraded"
 
+    @property
+    def is_bad(self):
+        return self in (OpenShiftStatus.unreachable, OpenShiftStatus.degraded)
+
 
 class NotYetExtant:
     MESSAGE = "Machine does not exist. Use 'crc start' to create it"
-    ready = False
-
-    def __init__(self, timestamp: datetime.datetime):
-        self.timestamp = timestamp
 
     @staticmethod
     def __str__():
@@ -47,8 +47,6 @@ class NotYetExtant:
 
 
 class OtherError:
-    ready = False
-
     def __init__(self, error: str):
         self.error = error
 
@@ -72,13 +70,6 @@ class StatusOutput:
         return f"crc={self.crc_status.value} openshift={self.openshift_status.value}"
 
     @property
-    def ready(self) -> bool:
-        return (self.crc_status, self.openshift_status) == (
-            CrcStatus.running,
-            OpenShiftStatus.running,
-        )
-
-    @property
     def notify_status(self) -> str:
         return f"CRC is {self.crc_status.value}, OpenShift is {self.openshift_status.value}"
 
@@ -90,15 +81,44 @@ class LifeCycleState(enum.Enum):
     stopped = enum.auto()
 
 
+class StatusTracker:
+    def __init__(self, status: OpenShiftStatus):
+        self.status = status
+        self.latest_time = self.earliest_time = datetime.now()
+
+    def update(self, status: OpenShiftStatus):
+        if status == self.status:
+            self.latest_time = datetime.now()
+        else:
+            self.status = status
+            self.latest_time = self.earliest_time = datetime.now()
+
+    @property
+    def duration(self) -> timedelta:
+        return self.latest_time - self.earliest_time
+
+
 class CrcMonitor:
     def __init__(self, interval: float):
         self.interval = interval
-        self.last_status: StatusOutput | NotYetExtant | OtherError | None = None
+        self.tracked_status: StatusTracker | None = None
+        "Time-tracked OpenShift status"
         self.lifecycle = LifeCycleState.not_yet_started
         log.debug("Creating monitor")
         self.monitor_task = asyncio.create_task(self._monitor())
         self.ready = asyncio.Event()
         self.stopped = asyncio.Event()
+
+    def update_status(self, status: OpenShiftStatus):
+        if self.tracked_status is None:
+            self.tracked_status = StatusTracker(status)
+        else:
+            self.tracked_status.update(status)
+
+            if status.is_bad and (duration := self.tracked_status.duration):
+                log.warning(
+                    "OpenShift has been %s for %s", status.value.lower(), duration
+                )
 
     # todo: wait did this even need to be cancellable?
     def cancel(self, msg=None):
@@ -108,25 +128,31 @@ class CrcMonitor:
         log.debug("Running crc status check")
         self.last_status = await status()
         log.info(self.lifecycle, self.last_status)
-        match (self.lifecycle, self.last_status):
-            case _, StatusOutput() as last_status if last_status.ready:
+        if not isinstance(self.last_status, StatusOutput):
+            return
+
+        os_status = self.last_status.openshift_status
+        self.update_status(os_status)
+
+        match (self.lifecycle, os_status):
+            case LifeCycleState.not_yet_started, CrcStatus.stopped:
+                pass
+            case LifeCycleState.not_yet_started | LifeCycleState.starting, OpenShiftStatus.starting:
+                self.lifecycle = LifeCycleState.starting
+            case _, OpenShiftStatus.running:
                 self.lifecycle = LifeCycleState.running
                 self.ready.set()  # go
-            case LifeCycleState.not_yet_started, StatusOutput(
-                _, OpenShiftStatus.starting
-            ):
-                self.lifecycle = LifeCycleState.starting
-            case LifeCycleState.running, StatusOutput(CrcStatus.stopped, _):
-                self.lifecycle = LifeCycleState.stopped
-                self.stopped.set()
-            case _, OtherError() | NotYetExtant():
-                # :(
+            case LifeCycleState.starting, OpenShiftStatus.unreachable | OpenShiftStatus.degraded | OpenShiftStatus.stopped:
                 pass
+            case LifeCycleState.running, _:
+                if self.last_status.crc_status is CrcStatus.stopped:
+                    self.lifecycle = LifeCycleState.stopped
+                    self.stopped.set()
             case _:
                 log.error(
                     "Unconsidered or illegal lifecycle-status combo %s %s",
                     self.lifecycle,
-                    self.last_status,
+                    os_status,
                 )
 
     async def _monitor(self):
@@ -154,11 +180,11 @@ async def status() -> StatusOutput | NotYetExtant | OtherError:
             "success": False,
             "error": str() as error,
         } if error == NotYetExtant.MESSAGE:
-            return NotYetExtant(datetime.datetime.now())
+            return NotYetExtant(datetime.now())
         case {"success": False, "error": str() as error}:
             return OtherError(error)
         case {"success": True}:
-            return StatusOutput(**output, timestamp=datetime.datetime.now())
+            return StatusOutput(**output, timestamp=datetime.now())
         case _:
             raise Exception(f"Unknown output status: {output}")
 
