@@ -139,6 +139,8 @@ class CrcMonitor:
                 pass
             case LifeCycleState.not_yet_started | LifeCycleState.starting, OpenShiftStatus.starting:
                 self.lifecycle = LifeCycleState.starting
+            case LifeCycleState.not_yet_started, OpenShiftStatus.unreachable if self.last_status.crc_status is CrcStatus.running:
+                self.lifecycle = LifeCycleState.starting
             case _, OpenShiftStatus.running:
                 self.lifecycle = LifeCycleState.running
                 self.ready.set()  # go
