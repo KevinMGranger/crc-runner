@@ -1,8 +1,9 @@
 import asyncio
 from collections import UserDict
 import collections.abc as abc
+from contextlib import asynccontextmanager
 import signal
-from typing import TypeVar, Any
+from typing import Coroutine, TypeVar, Any, Awaitable
 
 
 class _SignalListenerMap(UserDict[int, asyncio.Event]):
@@ -77,9 +78,59 @@ async def check_signal(
 
     del signal_listener_map[task_id]
 
+    # TODO: exception group(s), although could that actually happen?
     if event_task in done:
         raise SignalError(signal=signal)
     elif awaitable_task in done:
         return awaitable_task.result()
     else:
         raise RuntimeError("asyncio.wait returned even though no tasks were done")
+
+
+import asyncio
+from typing import TypeVar
+
+# https://gist.github.com/twisteroidambassador/f35c7b17d4493d492fe36ab3e5c92202
+
+
+class CancelledFromOutside(asyncio.CancelledError):
+    pass
+
+
+class CancelledFromInside(asyncio.CancelledError):
+    pass
+
+
+T = TypeVar("T")
+
+
+async def distinguish_cancellation(fut: Coroutine[T, Any, Any] | asyncio.Task[T]) -> T:
+    """Wait for a future. If cancelled, raise different exceptions depending
+    on who did the cancellation.
+    If fut was cancelled, propagate cancellation outward by raising
+    CancelledFromInside.
+    If this function was cancelled, cancel fut, and raise CancelledFromOutside.
+    """
+    if isinstance(fut, asyncio.Task):
+        task = fut
+    else:
+        task = asyncio.create_task(fut)
+
+    try:
+        # will only return once task is cancelled.
+        await asyncio.wait((task,))
+    except asyncio.CancelledError:
+        # if this was raised, that means _this_ function was cancelled, not `task`.
+
+        # TODO: can we / do we need to optionally disable this?
+        # will shielding fut cancel it, so we can leave it up to the caller?
+        task.cancel()
+        raise CancelledFromOutside
+
+    assert task.done()
+
+    # this means it returned because `task` was cancelled.
+    if task.cancelled():
+        raise CancelledFromInside
+
+    return task.result()
