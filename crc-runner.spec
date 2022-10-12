@@ -37,6 +37,7 @@ Coordinates this with a system-level service, so that haproxy can be started onc
 
 %install
 %pyproject_install
+%pyproject_save_files crc_runner
 
 # just install-user-services %{buildroot}/%{_userunitdir}
 # just install-system-services %{buildroot}/%{_unitdir}
