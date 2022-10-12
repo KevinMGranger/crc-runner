@@ -1,5 +1,6 @@
 - parse stdout for known failure modes and handle them (e.g. Bundle 'crc_libvirt_4.11.3_amd64' was requested, but the existing VM is using 'crc_libvirt_4.11.1_amd64'. Please delete your existing cluster and start again)
 - determine when creating a new cluster, then watchdog / time out
+  - detect when already running and do `start()` idempotently? We don't need preemptive starting anymore since there's no dbus
 
 - embed git version or something
 
