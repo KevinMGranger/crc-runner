@@ -1,15 +1,18 @@
 Name:           crc-runner
+License:        FIXME
 Version:        0.0.1
 Release:        1%{?dist}
 Summary:        A monitor for OpenShift Local
 
-BuildArch:      noarch
-
 URL:            https://github.com/KevinMGranger/python-crc-systemd
 Source0:        %{name}-%{version}.tar.gz
 
-BuildRequires:  python3-devel
+BuildRequires:  python3-devel pyproject-rpm-macros
+BuildRequires:  systemd-rpm-macros systemd-devel gcc
+BuildRequires:  just
+BuildArch:      noarch
 
+Requires:       python3
 Requires:       python3-dbus-next
 Requires:       python3-systemd
 
@@ -20,6 +23,8 @@ Runs crc itself as a user-level service, polling it to see if it's healthy.
 
 Coordinates this with a system-level service, so that haproxy can be started once it's ready.
 
+%generate_buildrequires
+%pyproject_buildrequires
 
 
 %prep
@@ -27,13 +32,22 @@ Coordinates this with a system-level service, so that haproxy can be started onc
 
 
 %build
-%configure
-%make_build
+%pyproject_wheel
+# %configure
+# %make_build # why isn't this documented
+# make build # TODO: gonna keep them uncompiled for now
 
 
 %install
-%make_install
+%pyproject_install
 
+just install-user-services %{_userunitdir}
+just install-system-services %{_unitdir}
+
+%post
+%systemd_post crc.service
+%systemd_user_post crc.service
+%systemd_user_post crc-log.service
 
 %files
 
