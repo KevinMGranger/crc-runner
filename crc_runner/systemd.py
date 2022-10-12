@@ -3,7 +3,7 @@ import enum
 import systemd.daemon
 from dbus_next.aio import MessageBus
 
-from crc_systemd import dbus
+from crc_runner import dbus
 
 
 class Notify:

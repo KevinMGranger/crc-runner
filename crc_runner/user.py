@@ -8,16 +8,16 @@ from signal import SIGTERM
 from typing import cast
 
 
-from crc_systemd import crc
-from crc_systemd.async_helpers import (
+from crc_runner import crc
+from crc_runner.async_helpers import (
     CancelledFromInside,
     CancelledFromOutside,
     SignalError,
     check_signal,
     distinguish_cancellation,
 )
-from crc_systemd.crc import SpawningStop, Stopping
-from crc_systemd.systemd import Notify
+from crc_runner.crc import SpawningStop, Stopping
+from crc_runner.systemd import Notify
 
 POLL_INTERVAL_SECONDS = 6
 

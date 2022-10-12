@@ -6,9 +6,9 @@ import sys
 from dbus_next.aio import MessageBus, ProxyObject
 from dbus_next.service import ServiceInterface, method
 
-from crc_systemd import systemd, dbus
-from crc_systemd.dbus import make_proxy
-from crc_systemd.systemd import Notify, UnitActiveState
+from crc_runner import systemd, dbus
+from crc_runner.dbus import make_proxy
+from crc_runner.systemd import Notify, UnitActiveState
 
 POLL_INTERVAL_SECONDS = 6
 

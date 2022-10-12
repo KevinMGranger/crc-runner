@@ -4,8 +4,8 @@ import logging
 import sys
 
 
-from crc_systemd import dbus, system, user
-from crc_systemd.log import setup as setup_logging
+from crc_runner import dbus, system, user
+from crc_runner.log import setup as setup_logging
 
 POLL_INTERVAL_SECONDS = 6
 
