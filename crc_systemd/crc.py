@@ -135,7 +135,7 @@ class CrcMonitor:
         self.update_status(os_status)
 
         match (self.lifecycle, os_status):
-            case LifeCycleState.not_yet_started, CrcStatus.stopped:
+            case LifeCycleState.not_yet_started, OpenShiftStatus.stopped:
                 pass
             case LifeCycleState.not_yet_started | LifeCycleState.starting, OpenShiftStatus.starting:
                 self.lifecycle = LifeCycleState.starting
