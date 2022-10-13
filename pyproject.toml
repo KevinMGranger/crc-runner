@@ -7,7 +7,6 @@ requires-python = ">=3.10"
 
 dependencies = [
     "dbus-next",
-    "systemd"
 ]
 
 [build-system]

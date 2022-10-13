@@ -9,13 +9,13 @@ Source0:        %{name}-%{version}.tar.gz
 
 BuildRequires:  python3-devel pyproject-rpm-macros python3-hatchling
 BuildRequires:  systemd-rpm-macros systemd-devel gcc
-BuildRequires:  python3dist(systemd-python)
+BuildRequires:  python3-systemd
 BuildRequires:  just
 BuildArch:      noarch
 
 Requires:       python3
 Requires:       python3-dbus-next
-# Requires:       python3-systemd
+Requires:       python3-systemd
 
 %description
 Run crc as a user, but with ingress as the system.
