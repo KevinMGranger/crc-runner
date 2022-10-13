@@ -51,7 +51,7 @@ class UserCrcRunner:
 
     async def _line_reader(self, stderr: StreamReader, suppress: bool):
         while line := (await stderr.readline()).decode():
-            print(line)
+            log.info(line)
             if MismatchedBundleError.ERROR_MESSAGE_SUBSTRING in line and not suppress:
                 raise MismatchedBundleError
 
@@ -159,7 +159,7 @@ class UserCrcRunner:
 
 
 async def run():
-    print("Starting CRC instance")
+    log.info("Starting CRC instance")
     runner = UserCrcRunner()
     await runner.start()
     await runner.wait_until_stopped()
