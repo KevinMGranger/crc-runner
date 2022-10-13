@@ -37,16 +37,16 @@ class _SignalMap(UserDict[signal.Signals, _SignalListenerMap]):
 
 _SIGNAL_MAP = _SignalMap()
 
+T = TypeVar("T")
+
 
 class SignalError(Exception):
     __match_args__ = ("signal",)
 
-    def __init__(self, signal: signal.Signals):
+    def __init__(self, signal: signal.Signals, task: asyncio.Task[T]):
         super().__init__(signal)
         self.signal = signal
-
-
-T = TypeVar("T")
+        self.task = task
 
 
 async def check_signal(
@@ -70,17 +70,17 @@ async def check_signal(
     task_id = id(awaitable_task)
     signal_listener_map = _SIGNAL_MAP.listener_map_for(signal)
     event = signal_listener_map[task_id]
-    event_task = asyncio.create_task(event.wait())
+    signal_event_task = asyncio.create_task(event.wait())
 
     done, _pending = await asyncio.wait(
-        (event_task, awaitable_task), return_when=asyncio.FIRST_COMPLETED
+        (signal_event_task, awaitable_task), return_when=asyncio.FIRST_COMPLETED
     )
 
     del signal_listener_map[task_id]
 
     # TODO: exception group(s), although could that actually happen?
-    if event_task in done:
-        raise SignalError(signal=signal)
+    if signal_event_task in done:
+        raise SignalError(signal, awaitable_task)
     elif awaitable_task in done:
         return awaitable_task.result()
     else:

@@ -70,12 +70,17 @@ class UserCrcRunner:
             proc.terminate()
             # continue to drain and print until exited
             # TODO: could this just be piped / spliced?
-            _task = asyncio.create_task(self._line_reader(stderr, suppress=True), name="User _crc_start bundle error line reader")
+            _task = asyncio.create_task(
+                self._line_reader(stderr, suppress=True),
+                name="User _crc_start bundle error line reader",
+            )
             raise MismatchedBundleError(_task)
 
     async def stop(self, source: str):
         if self.stop_task is None:
-            self.stop_task = asyncio.create_task(self._stop(source), name="User stop stop_task")
+            self.stop_task = asyncio.create_task(
+                self._stop(source), name="User stop stop_task"
+            )
         else:
             log.info("Asked to stop from %s but already stopping", source)
 
@@ -86,7 +91,9 @@ class UserCrcRunner:
         while True:
             match self.stop_state:
                 case None:
-                    self.stop_state = SpawningStop(asyncio.create_task(crc.stop(), name="User._stop crc stop"))
+                    self.stop_state = SpawningStop(
+                        asyncio.create_task(crc.stop(), name="User._stop crc stop")
+                    )
                     # here just in case it throws, so the stop task can still start
                     Notify.stopping()
 
@@ -101,7 +108,11 @@ class UserCrcRunner:
                     proc = await spawn_task
                     # see if this was already set while awaiting (from another call)
                     if not isinstance(self.stop_state, Stopping):
-                        self.stop_state = Stopping(asyncio.create_task(proc.wait(), name="User._stop crc stop wait"))
+                        self.stop_state = Stopping(
+                            asyncio.create_task(
+                                proc.wait(), name="User._stop crc stop wait"
+                            )
+                        )
 
                 case Stopping(stop_task):
                     log.info("Waiting on stop command")
@@ -111,7 +122,9 @@ class UserCrcRunner:
     async def start(self):
         if self.startup is None:
             proc = await crc.start()
-            self.startup = StartupProcess(proc, asyncio.create_task(self._start(proc), name="User start _start"))
+            self.startup = StartupProcess(
+                proc, asyncio.create_task(self._start(proc), name="User start _start")
+            )
         await self.startup.task
 
     async def _start(self, proc: aproc.Process):
@@ -144,10 +157,12 @@ class UserCrcRunner:
         try:
             # wait for successful status
             log.info("Waiting for CRC to successfuly start")
+            # TODO: do we need an abstraction for cancelling when a signal is received? or do we just need to always do it ourselves?
             await check_signal(self.monitor.ready.wait(), SIGTERM)
             Notify.ready("CRC Started")
         except SignalError as e:
             log.info("Got SIGTERM, stopping CRC")
+            e.task.cancel()
             await self.stop(STOPPING_FROM_SIGNAL)
             sys.exit()
 
