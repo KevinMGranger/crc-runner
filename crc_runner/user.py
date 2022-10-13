@@ -52,6 +52,8 @@ class UserCrcRunner:
 
     async def _line_reader(self, stderr: StreamReader, suppress: bool):
         while line := (await stderr.readline()).decode():
+            if suppress:
+                log.debug("DRAINED LINE")
             log.info(line)
             if MismatchedBundleError.ERROR_MESSAGE_SUBSTRING in line and not suppress:
                 raise MismatchedBundleError
@@ -67,6 +69,7 @@ class UserCrcRunner:
                 # raise subprocess.CalledProcessError(returncode, "crc start", output)
             self.startup = None
         except MismatchedBundleError:
+            log.error("Bundle mismatch. Manually delete cluster and run again.")
             proc.terminate()
             # continue to drain and print until exited
             # TODO: could this just be piped / spliced?
