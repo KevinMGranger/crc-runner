@@ -14,3 +14,7 @@ We could include those in the justfile if we want.
 
 - "systemd" on pypi is not the same as the package! That's why it was a problem.
 - I guess it had something to do with extracting dependencies form the wheel or dist-info or something, but that requires further investigation.
+
+# quick notes
+
+oops %h is not the user but the user _running the manager_
