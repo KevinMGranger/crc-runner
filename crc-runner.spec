@@ -4,7 +4,7 @@ Version:        0.0.1
 Release:        1%{?dist}
 Summary:        A monitor for OpenShift Local
 
-URL:            https://github.com/KevinMGranger/python-crc-systemd
+URL:            https://github.com/KevinMGranger/crc-runner
 Source0:        %{name}-%{version}.tar.gz
 
 BuildRequires:  python3-devel pyproject-rpm-macros python3-hatchling
