@@ -9,6 +9,7 @@ Source0:        %{name}-%{version}.tar.gz
 
 BuildRequires:  python3-devel pyproject-rpm-macros python3-hatchling
 BuildRequires:  systemd-rpm-macros systemd-devel gcc
+BuildRequires:  python3-sytemd
 BuildRequires:  just
 BuildArch:      noarch
 
