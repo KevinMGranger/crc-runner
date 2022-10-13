@@ -5,4 +5,4 @@ Description="CodeReady Containers"
 Type=notify
 User=kevin
 TimeoutStartSec=10min
-ExecStart=/usr/local/bin/python-crc-systemd system-start
+ExecStart=/usr/libexec/crc-runner system-start

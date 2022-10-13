@@ -12,4 +12,4 @@ TimeoutStopSec=10min
 
 Environment=PYTHONUNBUFFERED=1
 
-ExecStart=%h/python-crc-systemd/__main__.py start
+ExecStart=/usr/libexec/crc-runner start
