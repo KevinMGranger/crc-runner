@@ -6,4 +6,4 @@ Type=simple
 
 ExecStartPre=touch %h/.crc/crc.log
 
-ExecStart=systemd-cat tail -f %h/.crc/crc.log
+ExecStart=systemd-cat tail -f=name %h/.crc/crc.log
