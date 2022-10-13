@@ -81,6 +81,9 @@ class LifeCycleState(enum.Enum):
     running = enum.auto()
     stopped = enum.auto()
 
+    def __str__(self):
+        return self.value
+
 
 class StatusTracker:
     def __init__(self, status: OpenShiftStatus):
@@ -128,7 +131,7 @@ class CrcMonitor:
     async def _check_single_status(self):
         log.debug("Running crc status check")
         self.last_status = await status()
-        log.info("Got lifecycle %s, status %s", self.lifecycle, self.last_status)
+        log.info("lifecycle: %s, status: %s", self.lifecycle, self.last_status)
         if not isinstance(self.last_status, StatusOutput):
             return
 
