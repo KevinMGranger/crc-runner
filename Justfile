@@ -27,8 +27,8 @@ sysstat:
 	systemctl status crc
 
 format:
-	black crc_systemd
-	isort crc_systemd
+	black crc_runner
+	isort crc_runner
 
 user-local:
 	mkdir ~/.config/systemd/user/crc.service.d/
@@ -48,7 +48,7 @@ no-system-local:
 
 set-system-user user: make-system-dropin
 	#!/usr/bin/env bash
-  cat > /etc/systemd/system/crc.service.d <<EOF
+	cat > /etc/systemd/system/crc.service.d <<EOF
 	[Service]
 	User={{user}}
 	EOF
