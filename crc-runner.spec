@@ -53,6 +53,9 @@ EOF
 
 chmod +x %{buildroot}/%{_libexecdir}/crc-runner 
 
+%check
+%pyproject_check_import
+
 %post
 %systemd_post crc.service
 %systemd_user_post crc.service
