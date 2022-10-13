@@ -15,7 +15,7 @@ BuildArch:      noarch
 
 Requires:       python3
 Requires:       python3-dbus-next
-Requires:       python3-systemd
+# Requires:       python3-systemd
 
 %description
 Run crc as a user, but with ingress as the system.
