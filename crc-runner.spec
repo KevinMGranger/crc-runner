@@ -45,6 +45,9 @@ just install-system-service %{buildroot}/%{_unitdir}
 %systemd_user_post crc-log.service
 
 %files -f %{pyproject_files}
+%{_userunitdir}/crc.service
+%{_userunitdir}/crc-log.service
+%{_unitdir}/crc.service
 
 
 
