@@ -12,9 +12,9 @@ from datetime import datetime, timedelta
 log = logging.getLogger(__name__)
 
 CRC_PATH = pathlib.Path.home() / ".crc/bin/crc"
-CRC_START_ARGS = ["start"]
-CRC_STATUS_ARGS = ["status", "-o", "json"]
-CRC_STOP_ARGS = ["stop"]
+CRC_START_ARGS = ("start",)
+CRC_STATUS_ARGS = ("status", "-o", "json")
+CRC_STOP_ARGS = ("stop",)
 
 OTHER_ERROR_START = "Cannot get machine state"
 
@@ -109,7 +109,9 @@ class CrcMonitor:
         "Time-tracked OpenShift status"
         self.lifecycle = LifeCycleState.not_yet_started
         log.debug("Creating monitor")
-        self.monitor_task = asyncio.create_task(self._monitor(), name="CrcMonitor.monitor_task")
+        self.monitor_task = asyncio.create_task(
+            self._monitor(), name="CrcMonitor.monitor_task"
+        )
         self.ready = asyncio.Event()
         self.stopped = asyncio.Event()
 
@@ -196,15 +198,11 @@ async def status() -> StatusOutput | NotYetExtant | OtherError:
             raise Exception(f"Unknown output status: {output}")
 
 
-async def stop() -> asyncio.subprocess.Process:
-    return await asyncio.create_subprocess_exec(CRC_PATH, *CRC_STOP_ARGS)
-
-
-@dataclass(frozen=True)
-class SpawningStop:
-    task: asyncio.Task[asyncio.subprocess.Process]
-
-
-@dataclass(frozen=True)
-class Stopping:
-    task: asyncio.Task[int]
+async def stop(force: bool = False) -> asyncio.subprocess.Process:
+    if force:
+        args = CRC_STOP_ARGS + ("--force",)
+    else:
+        args = CRC_STOP_ARGS
+    return await asyncio.create_subprocess_exec(
+        CRC_PATH, *args, stderr=asyncio.subprocess.PIPE
+    )

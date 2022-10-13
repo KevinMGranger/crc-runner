@@ -3,7 +3,7 @@ import asyncio
 import asyncio.subprocess as aproc
 import logging
 import sys
-from asyncio import CancelledError, StreamReader
+from asyncio import CancelledError, InvalidStateError, StreamReader
 from signal import SIGTERM
 from typing import NamedTuple, cast
 
@@ -27,14 +27,24 @@ STOPPING_FROM_DBUS = "dbus"
 STOPPING_FROM_SIGNAL = "SIGTERM"
 STOPPING_FROM_CANCELLATION = "cancellation"
 
-CANNOT_GRACEFULLY_SHUTDOWN = "Cannot stop machine: VM Failed to gracefully shutdown, try the kill command"
 
-class MismatchedBundleError(Exception):
+# class ErrorMessageLineError(Exception):
+#     def __init__(self, line: str, task: asyncio.Task):
+#         super().__init__(line)
+#         self.line = line
+#         self.task = task
+
+ErrorMessageLineError = Exception
+
+
+class MismatchedBundleError(ErrorMessageLineError):
     ERROR_MESSAGE_SUBSTRING = "was requested, but the existing VM is using"
 
-    def __init__(self, line_task: asyncio.Task | None = None):
-        super().__init__()
-        self.line_task = line_task
+
+class CannotGracefullyShutdownError(ErrorMessageLineError):
+    ERROR_MESSAGE_SUBSTRING = (
+        "Cannot stop machine: VM Failed to gracefully shutdown, try the kill command"
+    )
 
 
 class StartupProcess(NamedTuple):
@@ -42,43 +52,86 @@ class StartupProcess(NamedTuple):
     task: asyncio.Task
 
 
+# UGH HOW DO I HANDLE ERRORS THAT BUBBLE UP WHILE STILL WANTING TO HANDLE LINES
+# for now, let's just pretend it won't be an issue. Might not even need to wait for tasks to exit.
+# just keeping this for reference.
+# TODO: could this just be piped / spliced?
+# async def just_forward_lines(stderr: StreamReader, log: logging.Logger):
+#     said_drained_yet = False
+
+#     while line := (await stderr.readline()).decode():
+#         if not said_drained_yet:
+#             log.debug("DRAINED LINE")
+#             said_drained_yet = True
+#         # TODO: why don't these double up on newlines?
+#         log.info(line)
+
+
+# TODO: pass logger from contextvar
+async def _read_stop_lines(stderr: StreamReader, log: logging.Logger):
+    while line := (await stderr.readline()).decode():
+        # TODO: why don't these double up on newlines?
+        if CannotGracefullyShutdownError.ERROR_MESSAGE_SUBSTRING in line:
+            log.error(line)
+            raise CannotGracefullyShutdownError
+
+        log.info(line)
+
+
+async def _start_line_reader(stderr: StreamReader, log: logging.Logger):
+    while line := (await stderr.readline()).decode():
+        if MismatchedBundleError.ERROR_MESSAGE_SUBSTRING in line:
+            log.error(line)
+            raise MismatchedBundleError
+
+        log.info(line)
+
+
 class UserCrcRunner:
     "Starts and monitors CRC, reacting to a stop request by shutting it down."
 
     def __init__(self):
         self.monitor = crc.CrcMonitor(POLL_INTERVAL_SECONDS)
-        self.stop_state: SpawningStop | Stopping | None = None
+        self.start_task: asyncio.Task | None = None
         self.stop_task: asyncio.Task | None = None
-        self.startup: StartupProcess | None = None
 
-    async def _line_reader(self, stderr: StreamReader, suppress: bool):
-        while line := (await stderr.readline()).decode():
-            if suppress:
-                log.debug("DRAINED LINE")
-            log.info(line)
-            if MismatchedBundleError.ERROR_MESSAGE_SUBSTRING in line and not suppress:
-                raise MismatchedBundleError
+    async def _crc_start(self):
+        # TODO: can we pipe these starts into some sort of journald-tee,
+        # so we can react to them and also have them forwarded even if we exit?
+        start_proc = await crc.start()
+        stderr = cast(StreamReader, start_proc.stderr)
 
-    async def _crc_start(self, proc: aproc.Process):
-        stderr = cast(StreamReader, proc.stderr)
         try:
-            await self._line_reader(stderr, suppress=False)
-            returncode = await proc.wait()
-            if returncode != 0:
-                log.error("`crc start` had exit status %s", returncode)
-                # apparently it can exit with a failure but still have started
-                # raise subprocess.CalledProcessError(returncode, "crc start", output)
-            self.startup = None
+            await _start_line_reader(stderr, log.getChild("crc start"))
         except MismatchedBundleError:
+            # TODO: shield from cancellation or do something else to make this still work
             log.error("Bundle mismatch. Manually delete cluster and run again.")
-            proc.terminate()
-            # continue to drain and print until exited
-            # TODO: could this just be piped / spliced?
-            _task = asyncio.create_task(
-                self._line_reader(stderr, suppress=True),
-                name="User _crc_start bundle error line reader",
+            # TODO: do we terminate the start proc? for now, no.
+
+            retcode = await start_proc.wait()
+            log.error("`crc start` had exit status %s", retcode)
+            sys.exit(retcode)
+
+        except CancelledError:
+            # drain lines while also shutting down
+            stop_task = asyncio.create_task(self.stop("crc start cancelled"))
+            lines_task = asyncio.shield(
+                just_forward_lines(stderr, log.getChild("crc start"))
             )
-            raise MismatchedBundleError(_task)
+            await asyncio.wait((stop_task, lines_task))
+            raise
+
+        try:
+            lines_task.result()
+        except InvalidStateError:
+            await lines_task
+
+        retcode = await start_task
+
+        if retcode != 0:
+            log.error("`crc start` had exit status %s", retcode)
+            # apparently it can exit with a failure but still have started,
+            # so we don't exit our program here
 
     async def stop(self, source: str):
         if self.stop_task is None:
@@ -92,52 +145,63 @@ class UserCrcRunner:
 
     async def _stop(self, source: str):
         log.info(f"Stopping from {source}")
-        while True:
-            match self.stop_state:
-                case None:
-                    self.stop_state = SpawningStop(
-                        asyncio.create_task(crc.stop(), name="User._stop crc stop")
-                    )
-                    # here just in case it throws, so the stop task can still start
-                    Notify.stopping()
 
-                    log.info("Cancelling start task")
-                    if self.startup is not None:
-                        # TODO: does it go back and forth? no, but only because of the stop facade.
-                        # Still messy.
-                        self.startup.process.terminate()  # TODO: should start handle this when cancelled?
-                        self.startup.task.cancel(msg="Stopping start_task from stop()")
+        log.debug("Spawning stop process")
+        stop_proc = await crc.stop()
 
-                case SpawningStop(spawn_task):
-                    proc = await spawn_task
-                    # see if this was already set while awaiting (from another call)
-                    if not isinstance(self.stop_state, Stopping):
-                        self.stop_state = Stopping(
-                            asyncio.create_task(
-                                proc.wait(), name="User._stop crc stop wait"
-                            )
-                        )
+        Notify.stopping()
 
-                case Stopping(stop_task):
-                    log.info("Waiting on stop command")
-                    await stop_task
-                    return
+        wait_task = asyncio.create_task(stop_proc.wait())
+        stderr = cast(StreamReader, stop_proc.stderr)
+        lines_task = asyncio.create_task(
+            _read_stop_lines(stderr, log.getChild("crc stop"))
+        )
+
+        log.info("Waiting on stop")
+        to_run = {wait_task, lines_task}
+        await asyncio.wait(to_run, return_when=asyncio.FIRST_COMPLETED)
+
+        to_run: set[asyncio.Task] = set()
+        try:
+            lines_task.result()
+        except InvalidStateError:
+            # not done yet
+            pass
+        except CannotGracefullyShutdownError:
+            to_run.add(
+                asyncio.create_task(
+                    just_forward_lines(stderr, log.getChild("crc stop"))
+                )
+            )
+            force_proc = await crc.stop(force=True)
+            force_task = asyncio.create_task(force_proc.wait())
+            force_lines_task = asyncio.create_task(
+                just_forward_lines(
+                    cast(StreamReader, force_proc.stderr), log.getChild("crc stop -f")
+                )
+            )
+            to_run |= {force_task, force_lines_task}
+
+        try:
+            wait_task.result()
+        except InvalidStateError:
+            to_run.add(wait_task)
+
+        # TODO: signal handling?
+        await asyncio.wait(to_run, return_when=asyncio.ALL_COMPLETED)
 
     async def start(self):
-        if self.startup is None:
-            proc = await crc.start()
-            self.startup = StartupProcess(
-                proc, asyncio.create_task(self._start(proc), name="User start _start")
-            )
+        if self.start_task is None:
+            self.start_task = asyncio.create_task(self._start())
         await self.startup.task
 
     async def _start(self, proc: aproc.Process):
         try:
             # wait for start
             await check_signal(self._crc_start(proc), SIGTERM)
-        except MismatchedBundleError as e:
+        except MismatchedBundleError:
             # no need to stop since it will fail to start
-            Notify.notify("Bundle version mismatch")
+            Notify.stopping("Bundle version mismatch")
             # TODO: this is all messy, spoopy action at a distance
             lines = cast(asyncio.Task, e.line_task)
             await lines
