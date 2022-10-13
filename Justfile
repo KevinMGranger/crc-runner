@@ -4,7 +4,7 @@ reload-user:
 reload-sys:
 	systemctl daemon-reload
 
-install-user-services user_unit_dir="~/.config/systemd/user":
+install-user-services user_unit_dir="$HOME/.config/systemd/user":
 	cp systemd/crc-user.service "{{user_unit_dir}}/crc.service"
 	cp systemd/crc-log.service "{{user_unit_dir}}/crc-log.service"
 
