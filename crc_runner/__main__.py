@@ -12,13 +12,17 @@ POLL_INTERVAL_SECONDS = 6
 log = logging.getLogger(__name__)
 
 
-setup_logging()
+def main():
+    setup_logging()
 
-match sys.argv[1]:
-    case "start":
-        asyncio.run(user.run())
-    case "system-start":
-        dbus.session_bus_env_setup()
-        asyncio.run(system.run())
-    case _:
-        sys.exit(f"Unknown command {sys.argv[1]}")
+    match sys.argv[1]:
+        case "start":
+            asyncio.run(user.run())
+        case "system-start":
+            dbus.session_bus_env_setup()
+            asyncio.run(system.run())
+        case _:
+            sys.exit(f"Unknown command {sys.argv[1]}")
+
+if __name__ == "__main__":
+    main()
