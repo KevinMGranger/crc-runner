@@ -27,6 +27,7 @@ STOPPING_FROM_DBUS = "dbus"
 STOPPING_FROM_SIGNAL = "SIGTERM"
 STOPPING_FROM_CANCELLATION = "cancellation"
 
+CANNOT_GRACEFULLY_SHUTDOWN = "Cannot stop machine: VM Failed to gracefully shutdown, try the kill command"
 
 class MismatchedBundleError(Exception):
     ERROR_MESSAGE_SUBSTRING = "was requested, but the existing VM is using"
