@@ -8,11 +8,11 @@ from signal import SIGTERM
 from typing import NamedTuple, cast
 
 from crc_runner import crc
+from crc_runner._systemd import Notify
 from crc_runner.async_helpers import (CancelledFromInside,
                                       CancelledFromOutside, SignalError,
                                       check_signal, distinguish_cancellation)
 from crc_runner.crc import SpawningStop, Stopping
-from crc_runner._systemd import Notify
 
 POLL_INTERVAL_SECONDS = 6
 

@@ -1,15 +1,13 @@
 import logging
 
+from systemd.journal import JournalHandler
+
 from ._systemd import under_systemd
 
 
 def setup():
-    try:
-        from systemd.journal import JournalHandler
-
-        if under_systemd():
-            logging.root.addHandler(JournalHandler())
-    except NameError:
-        pass
-
-    logging.root.setLevel(logging.DEBUG)
+    if under_systemd():
+        # TODO: will this use some sort of default format and mess with things? I don't think so but check.
+        logging.basicConfig(handlers=(JournalHandler(),), level=logging.DEBUG)
+    else:
+        logging.basicConfig(format="%(asctime)s %(message)s", level=logging.DEBUG)

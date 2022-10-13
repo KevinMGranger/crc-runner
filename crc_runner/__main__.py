@@ -1,14 +1,11 @@
 #!/usr/bin/python3
 import asyncio
-import logging
 import sys
 
 from crc_runner import dbus, system, user
 from crc_runner.log import setup as setup_logging
 
 POLL_INTERVAL_SECONDS = 6
-
-log = logging.getLogger(__name__)
 
 
 def main():
