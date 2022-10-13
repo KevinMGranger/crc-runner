@@ -82,7 +82,7 @@ class LifeCycleState(enum.Enum):
     stopped = enum.auto()
 
     def __str__(self):
-        return self.value
+        return self.name
 
 
 class StatusTracker:
