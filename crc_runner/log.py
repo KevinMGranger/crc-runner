@@ -1,6 +1,6 @@
 import logging
 
-from .systemd import under_systemd
+from ._systemd import under_systemd
 
 
 def setup():

@@ -6,9 +6,9 @@ import sys
 from dbus_next.aio import MessageBus, ProxyObject
 from dbus_next.service import ServiceInterface, method
 
-from crc_runner import dbus, systemd
+from crc_runner import _systemd, dbus
 from crc_runner.dbus import make_proxy
-from crc_runner.systemd import Notify, UnitActiveState
+from crc_runner._systemd import Notify, UnitActiveState
 
 POLL_INTERVAL_SECONDS = 6
 
@@ -24,14 +24,14 @@ class SystemCrcUserRunner(ServiceInterface):
     def __init__(self, bus: MessageBus, systemd_prox: ProxyObject):
         self.bus = bus
         self.systemd_prox = systemd_prox
-        self.systemd_manager = systemd_prox.get_interface(systemd.MANAGER_IFACE)
+        self.systemd_manager = systemd_prox.get_interface(_systemd.MANAGER_IFACE)
         self.crc_unit = None
         self.monitoring = None
 
     async def start(self):
         crc_path = await self.systemd_manager.call_load_unit("crc.service")  # type: ignore
-        crc_proxy = await make_proxy(self.bus, systemd.BUS_NAME, crc_path)
-        self.crc_unit = crc_unit = crc_proxy.get_interface(systemd.UNIT_IFACE)
+        crc_proxy = await make_proxy(self.bus, _systemd.BUS_NAME, crc_path)
+        self.crc_unit = crc_unit = crc_proxy.get_interface(_systemd.UNIT_IFACE)
 
         await crc_unit.call_start("fail")  # type: ignore
 
@@ -108,7 +108,7 @@ async def run():
     print("Connecting to dbus")
     bus = await dbus.connect()
     print("Asking user session to start CRC")
-    runner = SystemCrcUserRunner(bus, await systemd.karen(bus))
+    runner = SystemCrcUserRunner(bus, await _systemd.karen(bus))
     # TODO: hang on, this is different!
     # We need the user bus to communicate with the systemd session there,
     # but we need the system bus to listen for stop requests ourselves!
