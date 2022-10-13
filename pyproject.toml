@@ -10,9 +10,6 @@ dependencies = [
     "systemd"
 ]
 
-[project.scripts]
-crc-runner = "crc_runner.__main__:main"
-
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

@@ -35,9 +35,23 @@ Coordinates this with a system-level service, so that haproxy can be started onc
 %pyproject_install
 %pyproject_save_files crc_runner
 
+
 mkdir -p %{buildroot}/%{_userunitdir} %{buildroot}/%{_unitdir}
 just install-user-services %{buildroot}/%{_userunitdir}
 just install-system-service %{buildroot}/%{_unitdir}
+
+
+mkdir -p %{buildroot}/%{_libexecdir}
+
+cat > %{buildroot}/%{_libexecdir}/crc-runner <<EOF
+#!%{python3} -%{py3_shebang_flags}
+from crc_runner.__main__ import main
+
+main()
+
+EOF
+
+chmod +x %{buildroot}/%{_libexecdir}/crc-runner 
 
 %post
 %systemd_post crc.service
@@ -45,6 +59,8 @@ just install-system-service %{buildroot}/%{_unitdir}
 %systemd_user_post crc-log.service
 
 %files -f %{pyproject_files}
+%{_libexecdir}/crc-runner
+
 %{_userunitdir}/crc.service
 %{_userunitdir}/crc-log.service
 %{_unitdir}/crc.service
