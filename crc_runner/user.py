@@ -51,7 +51,7 @@ class UserCrcRunner:
         self.start_task = asyncio.create_task(self._crc_start())
 
     async def _line_reader(self, stderr: StreamReader, suppress: bool):
-        while line := str(await stderr.readline()):
+        while line := (await stderr.readline()).decode():
             print(line)
             if MismatchedBundleError.ERROR_MESSAGE_SUBSTRING in line and not suppress:
                 raise MismatchedBundleError
