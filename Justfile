@@ -48,7 +48,8 @@ no-system-local:
 
 set-system-user user: make-system-dropin
 	#!/usr/bin/env bash
-	cat > /etc/systemd/system/crc.service.d <<EOF
+	set -x
+	cat > /etc/systemd/system/crc.service.d/user.conf <<EOF
 	[Service]
 	User={{user}}
 	EOF
