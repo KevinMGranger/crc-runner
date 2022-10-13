@@ -31,8 +31,15 @@ format:
 	isort crc_runner
 
 user-local:
-	mkdir -p ~/.config/systemd/user/crc.service.d/
-	cp systemd/local-file-dropin.conf ~/.config/systemd/user/crc.service.d/
+  #!/usr/bin/env bash
+  set -x
+  mkdir -p ~/.config/systemd/user/crc.service.d/
+  cat > ~/.config/systemd/user/crc.service.d/local-file-dropin.conf <<EOF
+  [Service]
+  ExecStart=
+  Environment=PYTHONPATH=%h/.local/lib/python3.10/
+  ExecStart=/usr/bin/python3 -m crc_runner start
+  EOF
 
 no-user-local:
 	rm ~/.config/systemd/user/crc.service.d/local-file-dropin.conf
