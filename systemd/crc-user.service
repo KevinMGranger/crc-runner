@@ -1,6 +1,7 @@
 [Unit]
 Description="CodeReady Containers"
 Requires=crc-log.service
+AssertFileIsExecutable=%h/.crc/bin/crc
 
 [Install]
 WantedBy=default.target
