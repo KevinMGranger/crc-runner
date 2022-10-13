@@ -109,7 +109,7 @@ class CrcMonitor:
         "Time-tracked OpenShift status"
         self.lifecycle = LifeCycleState.not_yet_started
         log.debug("Creating monitor")
-        self.monitor_task = asyncio.create_task(self._monitor())
+        self.monitor_task = asyncio.create_task(self._monitor(), name="CrcMonitor.monitor_task")
         self.ready = asyncio.Event()
         self.stopped = asyncio.Event()
 
