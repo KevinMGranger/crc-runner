@@ -7,7 +7,7 @@ Summary:        A monitor for OpenShift Local
 URL:            https://github.com/KevinMGranger/python-crc-systemd
 Source0:        %{name}-%{version}.tar.gz
 
-BuildRequires:  python3-devel pyproject-rpm-macros
+BuildRequires:  python3-devel pyproject-rpm-macros python3-hatchling
 BuildRequires:  systemd-rpm-macros systemd-devel gcc
 BuildRequires:  just
 BuildArch:      noarch
@@ -24,7 +24,7 @@ Runs crc itself as a user-level service, polling it to see if it's healthy.
 Coordinates this with a system-level service, so that haproxy can be started once it's ready.
 
 %generate_buildrequires
-%pyproject_buildrequires
+%pyproject_buildrequires -w
 
 
 %prep
