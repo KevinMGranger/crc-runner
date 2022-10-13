@@ -3,6 +3,5 @@ Description="CodeReady Containers"
 
 [Service]
 Type=notify
-User=kevin
 TimeoutStartSec=10min
 ExecStart=/usr/libexec/crc-runner system-start

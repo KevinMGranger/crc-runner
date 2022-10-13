@@ -37,9 +37,18 @@ user-local:
 no-user-local:
 	rm ~/.config/systemd/user/crc.service.d/local-file-dropin.conf
 
-system-local:
+make-system-dropin:
 	mkdir /etc/systemd/system/crc.service.d/
+
+system-local: make-system-dropin
 	cp systemd/local-file-dropin.conf /etc/systemd/system/crc.service.d/	
 
 no-system-local:
 	rm /etc/systemd/system/crc.service.d/local-file-dropin.conf
+
+set-system-user user: make-system-dropin
+	#!/usr/bin/env bash
+  cat > /etc/systemd/system/crc.service.d <<EOF
+	[Service]
+	User={{user}}
+	EOF
