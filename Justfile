@@ -31,14 +31,14 @@ format:
 	isort crc_runner
 
 user-local:
-	mkdir ~/.config/systemd/user/crc.service.d/
+	mkdir -p ~/.config/systemd/user/crc.service.d/
 	cp systemd/local-file-dropin.conf ~/.config/systemd/user/crc.service.d/
 
 no-user-local:
 	rm ~/.config/systemd/user/crc.service.d/local-file-dropin.conf
 
 make-system-dropin:
-	mkdir /etc/systemd/system/crc.service.d/
+	mkdir -p /etc/systemd/system/crc.service.d/
 
 system-local: make-system-dropin
 	cp systemd/local-file-dropin.conf /etc/systemd/system/crc.service.d/	
