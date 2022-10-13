@@ -7,15 +7,10 @@ from asyncio import CancelledError, StreamReader
 from signal import SIGTERM
 from typing import NamedTuple, cast
 
-
 from crc_runner import crc
-from crc_runner.async_helpers import (
-    CancelledFromInside,
-    CancelledFromOutside,
-    SignalError,
-    check_signal,
-    distinguish_cancellation,
-)
+from crc_runner.async_helpers import (CancelledFromInside,
+                                      CancelledFromOutside, SignalError,
+                                      check_signal, distinguish_cancellation)
 from crc_runner.crc import SpawningStop, Stopping
 from crc_runner.systemd import Notify
 

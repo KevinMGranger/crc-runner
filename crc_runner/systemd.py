@@ -1,9 +1,14 @@
 import enum
+import os
 
 import systemd.daemon
 from dbus_next.aio import MessageBus
 
 from crc_runner import dbus
+
+
+def under_systemd() -> bool:
+    return "INVOCATION_ID" in os.environ
 
 
 class Notify:

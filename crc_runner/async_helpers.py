@@ -1,9 +1,9 @@
 import asyncio
-from collections import UserDict
 import collections.abc as abc
-from contextlib import asynccontextmanager
 import signal
-from typing import Coroutine, TypeVar, Any, Awaitable
+from collections import UserDict
+from contextlib import asynccontextmanager
+from typing import Any, Awaitable, Coroutine, TypeVar
 
 
 class _SignalListenerMap(UserDict[int, asyncio.Event]):

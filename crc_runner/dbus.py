@@ -1,5 +1,5 @@
-from contextlib import asynccontextmanager
 import os
+from contextlib import asynccontextmanager
 
 import dbus_next.aio as aio
 from dbus_next.constants import BusType
@@ -20,6 +20,7 @@ def session_bus_env_setup():
     uid = os.getuid()
     os.environ["XDG_RUNTIME_DIR"] = f"/run/user/{uid}"
     os.environ["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{uid}/bus"
+
 
 @asynccontextmanager
 async def bus_connection():

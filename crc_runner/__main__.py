@@ -3,7 +3,6 @@ import asyncio
 import logging
 import sys
 
-
 from crc_runner import dbus, system, user
 from crc_runner.log import setup as setup_logging
 
@@ -17,7 +16,7 @@ def main():
 
     if len(sys.argv) != 2:
         sys.exit("Usage: crc-runner start|system-start")
-    
+
     match sys.argv[1]:
         case "start":
             asyncio.run(user.run())
