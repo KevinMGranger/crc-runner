@@ -5,7 +5,7 @@ import logging
 import sys
 from asyncio import CancelledError, StreamReader
 from signal import SIGTERM
-from typing import cast
+from typing import NamedTuple, cast
 
 
 from crc_runner import crc
@@ -40,6 +40,11 @@ class MismatchedBundleError(Exception):
         self.line_task = line_task
 
 
+class StartupProcess(NamedTuple):
+    process: aproc.Process
+    task: asyncio.Task
+
+
 class UserCrcRunner:
     "Starts and monitors CRC, reacting to a stop request by shutting it down."
 
@@ -47,8 +52,7 @@ class UserCrcRunner:
         self.monitor = crc.CrcMonitor(POLL_INTERVAL_SECONDS)
         self.stop_state: SpawningStop | Stopping | None = None
         self.stop_task: asyncio.Task | None = None
-        self.start_proc: aproc.Process = None  # type: ignore
-        self.start_task = asyncio.create_task(self._crc_start())
+        self.startup: StartupProcess | None = None
 
     async def _line_reader(self, stderr: StreamReader, suppress: bool):
         while line := (await stderr.readline()).decode():
@@ -56,8 +60,7 @@ class UserCrcRunner:
             if MismatchedBundleError.ERROR_MESSAGE_SUBSTRING in line and not suppress:
                 raise MismatchedBundleError
 
-    async def _crc_start(self):
-        self.start_proc = proc = await crc.start()
+    async def _crc_start(self, proc: aproc.Process):
         stderr = cast(StreamReader, proc.stderr)
         try:
             await self._line_reader(stderr, suppress=False)
@@ -90,7 +93,11 @@ class UserCrcRunner:
                     Notify.stopping()
 
                     log.info("Cancelling start task")
-                    self.start_task.cancel(msg="Stopping start_task from stop()")
+                    startup = cast(StartupProcess, self.startup)
+                    # TODO: does it go back and forth? no, but only because of the stop facade.
+                    # Still messy.
+                    startup.task.cancel(msg="Stopping start_task from stop()")
+                    startup.process.terminate()  # TODO: should start handle this when cancelled?
 
                 case SpawningStop(spawn_task):
                     proc = await spawn_task
@@ -104,32 +111,37 @@ class UserCrcRunner:
                     return
 
     async def start(self):
+        if self.startup is None:
+            proc = await crc.start()
+            self.startup = StartupProcess(proc, asyncio.create_task(self._start(proc)))
+        await self.startup.task
+
+    async def _start(self, proc: aproc.Process):
         try:
             # wait for start
-            await distinguish_cancellation(check_signal(self.start_task, SIGTERM))
+            await check_signal(self._crc_start(proc), SIGTERM)
         except MismatchedBundleError as e:
+            # no need to stop since it will fail to start
             Notify.notify("Bundle version mismatch")
             # TODO: this is all messy, spoopy action at a distance
             lines = cast(asyncio.Task, e.line_task)
             await lines
-            retcode = await self.start_proc.wait()
+            startup = cast(StartupProcess, self.startup)
+            retcode = await startup.process.wait()
             sys.exit(retcode)
-        except CancelledFromOutside:
-            log.info("start was cancelled, when would this happen though?")
-            raise CancelledError
-        except CancelledFromInside:
-            # this also wouldn't happen, right? now that dbus is gone?
-            log.info("start_exec was cancelled, must be from stopping")
-            await self.stop_task  # type: ignore # TODO: can we make some guarantees here?
-            raise CancelledError
         except CancelledError as e:
             log.info("Cancelled, stopping")
+            # if this did actually cancel "itself", would it stop progressing if it wasn't a task?
             await self.stop(STOPPING_FROM_CANCELLATION)
             raise
         except SignalError as e:
             log.info("Got SIGTERM, stopping CRC")
             await self.stop(STOPPING_FROM_SIGNAL)
             sys.exit()
+        except Exception:
+            log.error("unknown exception, stopping CRC")
+            await self.stop("unknown")
+            raise
 
         try:
             # wait for successful status
