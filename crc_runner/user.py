@@ -9,9 +9,10 @@ from typing import NamedTuple, cast
 
 from crc_runner import crc
 from crc_runner._systemd import Notify
-from crc_runner.async_helpers import (CancelledFromInside,
-                                      CancelledFromOutside, SignalError,
-                                      check_signal, distinguish_cancellation)
+from crc_runner.async_helpers import (
+    SignalError,
+    check_signal,
+)
 from crc_runner.crc import SpawningStop, Stopping
 
 POLL_INTERVAL_SECONDS = 6
@@ -64,6 +65,7 @@ class UserCrcRunner:
                 log.error("`crc start` had exit status %s", returncode)
                 # apparently it can exit with a failure but still have started
                 # raise subprocess.CalledProcessError(returncode, "crc start", output)
+            self.startup = None
         except MismatchedBundleError:
             proc.terminate()
             # continue to drain and print until exited
@@ -88,11 +90,11 @@ class UserCrcRunner:
                     Notify.stopping()
 
                     log.info("Cancelling start task")
-                    startup = cast(StartupProcess, self.startup)
-                    # TODO: does it go back and forth? no, but only because of the stop facade.
-                    # Still messy.
-                    startup.task.cancel(msg="Stopping start_task from stop()")
-                    startup.process.terminate()  # TODO: should start handle this when cancelled?
+                    if self.startup is not None:
+                        # TODO: does it go back and forth? no, but only because of the stop facade.
+                        # Still messy.
+                        self.startup.process.terminate()  # TODO: should start handle this when cancelled?
+                        self.startup.task.cancel(msg="Stopping start_task from stop()")
 
                 case SpawningStop(spawn_task):
                     proc = await spawn_task
