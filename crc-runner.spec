@@ -45,12 +45,11 @@ mkdir -p %{buildroot}/%{_libexecdir}
 
 cat > %{buildroot}/%{_libexecdir}/crc-runner <<EOF
 #!%{python3} -%{py3_shebang_flags}
-import crc_runner
 from crc_runner.__main__ import main
 import sys
 import os
 
-print(f"running from {crc_runner.__file__=} {sys.path=} {os.environ.get('PYTHONPATH', '')=}")
+print(f"running from {main.__file__=} {sys.path=} {os.environ.get('PYTHONPATH', '')=}")
 
 main()
 
