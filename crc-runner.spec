@@ -37,7 +37,7 @@ Coordinates this with a system-level service, so that haproxy can be started onc
 
 mkdir -p %{buildroot}/%{_userunitdir} %{buildroot}/%{_unitdir}
 just install-user-services %{buildroot}/%{_userunitdir}
-just install-system-services %{buildroot}/%{_unitdir}
+just install-system-service %{buildroot}/%{_unitdir}
 
 %post
 %systemd_post crc.service
