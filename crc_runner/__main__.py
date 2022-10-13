@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 import asyncio
+import logging
 import sys
 
 from crc_runner import dbus, system, user
@@ -10,6 +11,7 @@ POLL_INTERVAL_SECONDS = 6
 
 def main():
     setup_logging()
+    logging.debug("Running from %s", __file__)
 
     if len(sys.argv) != 2:
         sys.exit("Usage: crc-runner start|system-start")
