@@ -11,7 +11,7 @@ POLL_INTERVAL_SECONDS = 6
 
 def main():
     setup_logging()
-    logging.debug("Running from %s", __file__)
+    logging.debug("Running from %s (%s)", __file__, sys.path)
 
     if len(sys.argv) != 2:
         sys.exit("Usage: crc-runner start|system-start")
@@ -22,6 +22,8 @@ def main():
         case "system-start":
             dbus.session_bus_env_setup()
             asyncio.run(system.run())
+        case "checkrun":
+            pass
         case _:
             sys.exit(f"Unknown command {sys.argv[1]}")
 
