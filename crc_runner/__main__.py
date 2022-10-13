@@ -15,6 +15,9 @@ log = logging.getLogger(__name__)
 def main():
     setup_logging()
 
+    if len(sys.argv) != 2:
+        sys.exit("Usage: crc-runner start|system-start")
+    
     match sys.argv[1]:
         case "start":
             asyncio.run(user.run())
@@ -23,6 +26,7 @@ def main():
             asyncio.run(system.run())
         case _:
             sys.exit(f"Unknown command {sys.argv[1]}")
+
 
 if __name__ == "__main__":
     main()
