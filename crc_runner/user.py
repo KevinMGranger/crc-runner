@@ -1,6 +1,8 @@
 #!/usr/bin/python
 from __future__ import annotations
 import asyncio
+from dbus_next.aio import MessageBus, ProxyObject
+from dbus_next.service import ServiceInterface, method
 import asyncio.subprocess as aproc
 from dataclasses import dataclass
 import logging
@@ -14,11 +16,13 @@ from asyncio import (
 from signal import SIGTERM
 from typing import ClassVar, NamedTuple, TypeVar, cast
 import typing
+from crc_runner import dbus
 
 from crc_runner import crc
 from crc_runner._systemd import Notify
 from crc_runner.async_helpers import (
     SignalError,
+    check_event,
     check_signal,
     future_coro,
 )
@@ -26,6 +30,8 @@ from crc_runner.async_helpers import (
 POLL_INTERVAL_SECONDS = 6
 
 log = logging.getLogger(__name__)
+
+T = TypeVar("T")
 
 # TODO: signal handling sucks and was a mistake. Let's go back to dbus.
 
@@ -66,15 +72,24 @@ class CannotGracefullyShutdownError(ErrorMessageLineError):
     )
 
 
-class UserCrcRunner:
+class StopRequested(Exception):
+    def __init__(self, task: asyncio.Task):
+        self.task = task
+
+
+class UserCrcRunner(ServiceInterface):
     "Starts and monitors CRC, reacting to a stop request by shutting it down."
 
     def __init__(self):
         self.monitor = crc.CrcMonitor(POLL_INTERVAL_SECONDS)
         self._drain_tasks: list[asyncio.Task] = []
+        self.stop_task: asyncio.Task | None = None
+        self.stop_requested = asyncio.Event()
+
+    async def check_for_stop(self, awaitable: typing.Awaitable[T]) -> T:
+        return await check_event(awaitable, self.stop_requested, StopRequested)
 
     async def _crc_start(self) -> int:
-        "If raising signalerror, already cancelled the start"
         start_proc = await crc.start()
         stderr = cast(StreamReader, start_proc.stderr)
         start_log = log.getChild("crc start")
@@ -130,9 +145,16 @@ class UserCrcRunner:
             await non_checking_log(stderr, log.getChild("crc stop -f"))
             return await stop_proc.wait()
 
+    @method(name="stop")
+    async def dbus_stop(self) -> "i":  # type: ignore
+        return await self.stop()
+
     async def stop(self):
-        log.info("Waiting on stop")
-        return await self._crc_stop()
+        if self.stop_task is None:
+            self.stop_task = mktask(self._crc_stop())
+            log.info("Waiting on stop")
+
+        return await self.stop_task
 
     async def start(self):
         try:
@@ -171,8 +193,14 @@ class UserCrcRunner:
 
 
 async def run():
-    log.info("Starting CRC instance")
+    log.info("Connecting to dbus")
+    bus = await dbus.connect()
+    await bus.request_name("fyi.kmg.crc_runner")
     runner = UserCrcRunner()
+    bus.export("/fyi/kmg/crc_runner/Runner1", runner)
+    log.info("Starting CRC instance")
     await runner.start()
     await runner.wait_until_stopped()
     await runner.wait_for_drains()
+    bus.disconnect()
+    await bus.wait_for_disconnect()
