@@ -1,40 +1,59 @@
 #!/usr/bin/python
+from __future__ import annotations
 import asyncio
 import asyncio.subprocess as aproc
+from dataclasses import dataclass
 import logging
 import sys
-from asyncio import CancelledError, InvalidStateError, StreamReader
+from asyncio import (
+    CancelledError,
+    InvalidStateError,
+    StreamReader,
+    create_task as mktask,
+)
 from signal import SIGTERM
-from typing import NamedTuple, cast
+from typing import ClassVar, NamedTuple, TypeVar, cast
+import typing
 
 from crc_runner import crc
 from crc_runner._systemd import Notify
 from crc_runner.async_helpers import (
     SignalError,
     check_signal,
+    future_coro,
 )
-from crc_runner.crc import SpawningStop, Stopping
 
 POLL_INTERVAL_SECONDS = 6
 
 log = logging.getLogger(__name__)
 
-CANCELLED_FROM_STOP_CALL = "cancelled from dbus stop"
-CANCELLED_FROM_SIGNAL = "cancelled from signal"
+# TODO: signal handling sucks and was a mistake. Let's go back to dbus.
 
-# TODO: after removing dbus, do we need these different reasons? when would the user runner even be cancelled?
-STOPPING_FROM_DBUS = "dbus"
-STOPPING_FROM_SIGNAL = "SIGTERM"
-STOPPING_FROM_CANCELLATION = "cancellation"
+# handling these lines properly if they don't close is hard. I guess they'd get epipe.
+# but maybe I just don't use JournalHandler and instead run subprograms through
+class ErrorMessageLineError(Exception):
+    ERROR_MESSAGE_SUBSTRING: ClassVar[str]
 
 
-# class ErrorMessageLineError(Exception):
-#     def __init__(self, line: str, task: asyncio.Task):
-#         super().__init__(line)
-#         self.line = line
-#         self.task = task
+Exc = TypeVar("Exc", bound=ErrorMessageLineError)
 
-ErrorMessageLineError = Exception
+
+async def checking_log(stream: StreamReader, exc: type[Exc], log: logging.Logger):
+    while line := (await stream.readline()).decode():
+        if exc.ERROR_MESSAGE_SUBSTRING in line:
+            log.error(line)
+            raise exc()
+        log.info(line)
+
+
+async def non_checking_log(stream: StreamReader, log: logging.Logger):
+    said_drained = False
+    while line := (await stream.readline()).decode():
+        # temporary
+        if not said_drained:
+            log.debug("drain gang")
+            said_drained = True
+        log.info(line)
 
 
 class MismatchedBundleError(ErrorMessageLineError):
@@ -47,191 +66,96 @@ class CannotGracefullyShutdownError(ErrorMessageLineError):
     )
 
 
-class StartupProcess(NamedTuple):
-    process: aproc.Process
-    task: asyncio.Task
-
-
-# UGH HOW DO I HANDLE ERRORS THAT BUBBLE UP WHILE STILL WANTING TO HANDLE LINES
-# for now, let's just pretend it won't be an issue. Might not even need to wait for tasks to exit.
-# just keeping this for reference.
-# TODO: could this just be piped / spliced?
-# async def just_forward_lines(stderr: StreamReader, log: logging.Logger):
-#     said_drained_yet = False
-
-#     while line := (await stderr.readline()).decode():
-#         if not said_drained_yet:
-#             log.debug("DRAINED LINE")
-#             said_drained_yet = True
-#         # TODO: why don't these double up on newlines?
-#         log.info(line)
-
-
-# TODO: pass logger from contextvar
-async def _read_stop_lines(stderr: StreamReader, log: logging.Logger):
-    while line := (await stderr.readline()).decode():
-        # TODO: why don't these double up on newlines?
-        if CannotGracefullyShutdownError.ERROR_MESSAGE_SUBSTRING in line:
-            log.error(line)
-            raise CannotGracefullyShutdownError
-
-        log.info(line)
-
-
-async def _start_line_reader(stderr: StreamReader, log: logging.Logger):
-    while line := (await stderr.readline()).decode():
-        if MismatchedBundleError.ERROR_MESSAGE_SUBSTRING in line:
-            log.error(line)
-            raise MismatchedBundleError
-
-        log.info(line)
-
-
 class UserCrcRunner:
     "Starts and monitors CRC, reacting to a stop request by shutting it down."
 
     def __init__(self):
         self.monitor = crc.CrcMonitor(POLL_INTERVAL_SECONDS)
-        self.start_task: asyncio.Task | None = None
-        self.stop_task: asyncio.Task | None = None
+        self._drain_tasks: list[asyncio.Task] = []
 
-    async def _crc_start(self):
-        # TODO: can we pipe these starts into some sort of journald-tee,
-        # so we can react to them and also have them forwarded even if we exit?
+    async def _crc_start(self) -> int:
+        "If raising signalerror, already cancelled the start"
         start_proc = await crc.start()
         stderr = cast(StreamReader, start_proc.stderr)
+        start_log = log.getChild("crc start")
 
         try:
-            await _start_line_reader(stderr, log.getChild("crc start"))
+            await check_signal(
+                checking_log(stderr, MismatchedBundleError, start_log), SIGTERM
+            )
+            retcode = await start_proc.wait()
         except MismatchedBundleError:
-            # TODO: shield from cancellation or do something else to make this still work
-            log.error("Bundle mismatch. Manually delete cluster and run again.")
-            # TODO: do we terminate the start proc? for now, no.
+            msg = "Bundle mismatch. Manually delete cluster and run again."
+            Notify.stopping(msg)
+            log.error(msg)
 
             retcode = await start_proc.wait()
             log.error("`crc start` had exit status %s", retcode)
             sys.exit(retcode)
-
-        except CancelledError:
-            # drain lines while also shutting down
-            stop_task = asyncio.create_task(self.stop("crc start cancelled"))
-            lines_task = asyncio.shield(
-                just_forward_lines(stderr, log.getChild("crc start"))
+        except SignalError as e:
+            log.info("Got SIGTERM, cancelling CRC start")
+            e.task.cancel()  # existing line reader
+            # Drain lines while also shutting down.
+            lines_task = asyncio.create_task(
+                future_coro(asyncio.shield(non_checking_log(stderr, start_log)))
             )
-            await asyncio.wait((stop_task, lines_task))
+            self._drain_tasks.append(lines_task)
+            await asyncio.sleep(0)
             raise
 
-        try:
-            lines_task.result()
-        except InvalidStateError:
-            await lines_task
+        # apparently it can exit with a failure but still have started,
+        # so we don't exit our program here
+        _log = log.error if retcode != 0 else log.info
+        _log("`crc start` had exit status %s", retcode)
+        return retcode
 
-        retcode = await start_task
-
-        if retcode != 0:
-            log.error("`crc start` had exit status %s", retcode)
-            # apparently it can exit with a failure but still have started,
-            # so we don't exit our program here
-
-    async def stop(self, source: str):
-        if self.stop_task is None:
-            self.stop_task = asyncio.create_task(
-                self._stop(source), name="User stop stop_task"
-            )
-        else:
-            log.info("Asked to stop from %s but already stopping", source)
-
-        return await self.stop_task
-
-    async def _stop(self, source: str):
-        log.info(f"Stopping from {source}")
-
-        log.debug("Spawning stop process")
-        stop_proc = await crc.stop()
-
-        Notify.stopping()
-
-        wait_task = asyncio.create_task(stop_proc.wait())
+    async def _crc_stop(self) -> int:
+        stop_proc = await crc.stop(force=False)
         stderr = cast(StreamReader, stop_proc.stderr)
-        lines_task = asyncio.create_task(
-            _read_stop_lines(stderr, log.getChild("crc stop"))
-        )
+        stop_log = log.getChild("crc stop")
 
-        log.info("Waiting on stop")
-        to_run = {wait_task, lines_task}
-        await asyncio.wait(to_run, return_when=asyncio.FIRST_COMPLETED)
-
-        to_run: set[asyncio.Task] = set()
         try:
-            lines_task.result()
-        except InvalidStateError:
-            # not done yet
-            pass
+            await checking_log(stderr, CannotGracefullyShutdownError, stop_log)
+            return await stop_proc.wait()
         except CannotGracefullyShutdownError:
-            to_run.add(
-                asyncio.create_task(
-                    just_forward_lines(stderr, log.getChild("crc stop"))
-                )
+            lines_task = mktask(
+                future_coro(asyncio.shield(non_checking_log(stderr, stop_log)))
             )
+            self._drain_tasks.append(lines_task)
+
+            Notify.notify("forcing stop")
             force_proc = await crc.stop(force=True)
-            force_task = asyncio.create_task(force_proc.wait())
-            force_lines_task = asyncio.create_task(
-                just_forward_lines(
-                    cast(StreamReader, force_proc.stderr), log.getChild("crc stop -f")
-                )
-            )
-            to_run |= {force_task, force_lines_task}
+            stderr = cast(StreamReader, force_proc.stderr)
 
-        try:
-            wait_task.result()
-        except InvalidStateError:
-            to_run.add(wait_task)
+            await non_checking_log(stderr, log.getChild("crc stop -f"))
+            return await stop_proc.wait()
 
-        # TODO: signal handling?
-        await asyncio.wait(to_run, return_when=asyncio.ALL_COMPLETED)
+    async def stop(self):
+        log.info("Waiting on stop")
+        return await self._crc_stop()
 
     async def start(self):
-        if self.start_task is None:
-            self.start_task = asyncio.create_task(self._start())
-        await self.startup.task
-
-    async def _start(self, proc: aproc.Process):
         try:
             # wait for start
-            await check_signal(self._crc_start(proc), SIGTERM)
-        except MismatchedBundleError:
-            # no need to stop since it will fail to start
-            Notify.stopping("Bundle version mismatch")
-            # TODO: this is all messy, spoopy action at a distance
-            lines = cast(asyncio.Task, e.line_task)
-            await lines
-            startup = cast(StartupProcess, self.startup)
-            retcode = await startup.process.wait()
-            sys.exit(retcode)
-        except CancelledError as e:
-            log.info("Cancelled, stopping")
-            # if this did actually cancel "itself", would it stop progressing if it wasn't a task?
-            await self.stop(STOPPING_FROM_CANCELLATION)
-            raise
+            await self._crc_start()
         except SignalError as e:
             log.info("Got SIGTERM, stopping CRC")
-            await self.stop(STOPPING_FROM_SIGNAL)
-            sys.exit()
-        except Exception:
-            log.error("unknown exception, stopping CRC")
-            await self.stop("unknown")
-            raise
+            await self.stop()
+            sys.exit(128 + SIGTERM)
 
         try:
-            # wait for successful status
             log.info("Waiting for CRC to successfuly start")
-            # TODO: do we need an abstraction for cancelling when a signal is received? or do we just need to always do it ourselves?
             await check_signal(self.monitor.ready.wait(), SIGTERM)
             Notify.ready("CRC Started")
         except SignalError as e:
-            log.info("Got SIGTERM, stopping CRC")
-            e.task.cancel()
-            await self.stop(STOPPING_FROM_SIGNAL)
+            msg = "Got SIGTERM, stopping CRC"
+
+            log.info(msg)
+            Notify.stopping(msg)
+
+            e.task.cancel()  # monitor wait
+
+            await self.stop()
             sys.exit()
 
     async def wait_until_stopped(self):
@@ -239,9 +163,11 @@ class UserCrcRunner:
             await check_signal(self.monitor.stopped.wait(), SIGTERM)
         except SignalError as e:
             log.info("Got SIGTERM, stopping CRC")
-            await self.stop(STOPPING_FROM_SIGNAL)
+            await self.stop()
             await self.monitor.stopped.wait()
-            sys.exit()
+
+    async def wait_for_drains(self):
+        await asyncio.wait(self._drain_tasks)
 
 
 async def run():
@@ -249,3 +175,4 @@ async def run():
     runner = UserCrcRunner()
     await runner.start()
     await runner.wait_until_stopped()
+    await runner.wait_for_drains()
