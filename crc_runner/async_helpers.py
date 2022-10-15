@@ -1,11 +1,14 @@
 import asyncio
 import collections.abc as abc
+from functools import partial
 import signal
 from collections import UserDict
 from contextlib import asynccontextmanager
-from typing import Any, Awaitable, Coroutine, TypeVar
+from typing import Any, Awaitable, Callable, Coroutine, TypeVar
+import typing
 
 T = TypeVar("T")
+Exc = TypeVar("Exc", bound=BaseException)
 
 
 def future_coro(f: asyncio.Future[T]) -> Coroutine[Any, Any, T]:
@@ -13,6 +16,37 @@ def future_coro(f: asyncio.Future[T]) -> Coroutine[Any, Any, T]:
         return await f
 
     return _()
+
+
+async def check_event(
+    awaitable: typing.Awaitable[T],
+    event: asyncio.Event,
+    exc_factory: Callable[[asyncio.Task[T]], Exc],
+) -> T:
+    """Run a coroutine, raising an exception from the given factory
+    if the event get set."""
+
+    if isinstance(awaitable, asyncio.Task):
+        task = awaitable
+    else:
+
+        async def why_is_this_necessary():
+            return await awaitable
+
+        task = asyncio.create_task(why_is_this_necessary())
+
+    event_task = asyncio.create_task(event.wait())
+
+    await asyncio.wait((event_task, task), return_when=asyncio.FIRST_COMPLETED)
+
+    if event_task.done():
+        # should only be finished or still pending, never cancelled or excepted
+        raise exc_factory(task)
+    elif task.done():
+        event_task.cancel()
+        return task.result()
+    else:
+        raise RuntimeError("asyncio.wait returned even though no tasks were done")
 
 
 class _SignalListenerMap(UserDict[int, asyncio.Event]):
@@ -57,46 +91,31 @@ class SignalError(Exception):
 
 
 async def check_signal(
-    awaitable: abc.Coroutine[Any, Any, T] | asyncio.Task[T],
+    awaitable: typing.Awaitable[T],
     signal: signal.Signals,
 ) -> T:
     """
     Run a coroutine, raising an exception if a signal is recieved while doing so.
     """
 
-    match awaitable:
-        case asyncio.Task():
-            task = awaitable
-        case _ if asyncio.iscoroutine(awaitable):
-            # TODO why doesn't the type propogate?
-            # answer: because iscoroutine is a type guard that doesn't have an overload
-            task: asyncio.Task[T] = asyncio.create_task(awaitable)
-        case _:
-            raise TypeError("awaitable must be a coroutine or task")
+    if isinstance(awaitable, asyncio.Task):
+        task = awaitable
+    else:
+
+        async def why_is_this_necessary():
+            return await awaitable
+
+        task = asyncio.create_task(why_is_this_necessary())
 
     task_id = id(task)
     signal_listener_map = _SIGNAL_MAP.listener_map_for(signal)
     event = signal_listener_map[task_id]
-    signal_event_task = asyncio.create_task(event.wait())
 
-    await asyncio.wait(
-        (signal_event_task, task), return_when=asyncio.FIRST_COMPLETED
-    )
+    try:
+        return await check_event(task, event, partial(SignalError, signal))
+    finally:
+        del signal_listener_map[task_id]
 
-    del signal_listener_map[task_id]
-
-    if signal_event_task.done():
-        # should only be finished or still pending, never cancelled or excepted
-        raise SignalError(signal, task)
-    elif task.done():
-        signal_event_task.cancel()
-        return task.result()
-    else:
-        raise RuntimeError("asyncio.wait returned even though no tasks were done")
-
-
-import asyncio
-from typing import TypeVar
 
 # https://gist.github.com/twisteroidambassador/f35c7b17d4493d492fe36ab3e5c92202
 
@@ -107,9 +126,6 @@ class CancelledFromOutside(asyncio.CancelledError):
 
 class CancelledFromInside(asyncio.CancelledError):
     pass
-
-
-T = TypeVar("T")
 
 
 async def distinguish_cancellation(fut: Coroutine[T, Any, Any] | asyncio.Task[T]) -> T:
