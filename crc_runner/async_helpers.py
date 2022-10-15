@@ -5,6 +5,15 @@ from collections import UserDict
 from contextlib import asynccontextmanager
 from typing import Any, Awaitable, Coroutine, TypeVar
 
+T = TypeVar("T")
+
+
+def future_coro(f: asyncio.Future[T]) -> Coroutine[Any, Any, T]:
+    async def _():
+        return await f
+
+    return _()
+
 
 class _SignalListenerMap(UserDict[int, asyncio.Event]):
     def handle(self):
@@ -37,8 +46,6 @@ class _SignalMap(UserDict[signal.Signals, _SignalListenerMap]):
 
 _SIGNAL_MAP = _SignalMap()
 
-T = TypeVar("T")
-
 
 class SignalError(Exception):
     __match_args__ = ("signal",)
@@ -59,30 +66,31 @@ async def check_signal(
 
     match awaitable:
         case asyncio.Task():
-            awaitable_task = awaitable
+            task = awaitable
         case _ if asyncio.iscoroutine(awaitable):
             # TODO why doesn't the type propogate?
             # answer: because iscoroutine is a type guard that doesn't have an overload
-            awaitable_task: asyncio.Task[T] = asyncio.create_task(awaitable)
+            task: asyncio.Task[T] = asyncio.create_task(awaitable)
         case _:
             raise TypeError("awaitable must be a coroutine or task")
 
-    task_id = id(awaitable_task)
+    task_id = id(task)
     signal_listener_map = _SIGNAL_MAP.listener_map_for(signal)
     event = signal_listener_map[task_id]
     signal_event_task = asyncio.create_task(event.wait())
 
-    done, _pending = await asyncio.wait(
-        (signal_event_task, awaitable_task), return_when=asyncio.FIRST_COMPLETED
+    await asyncio.wait(
+        (signal_event_task, task), return_when=asyncio.FIRST_COMPLETED
     )
 
     del signal_listener_map[task_id]
 
-    # TODO: exception group(s), although could that actually happen?
-    if signal_event_task in done:
-        raise SignalError(signal, awaitable_task)
-    elif awaitable_task in done:
-        return awaitable_task.result()
+    if signal_event_task.done():
+        # should only be finished or still pending, never cancelled or excepted
+        raise SignalError(signal, task)
+    elif task.done():
+        signal_event_task.cancel()
+        return task.result()
     else:
         raise RuntimeError("asyncio.wait returned even though no tasks were done")
 
