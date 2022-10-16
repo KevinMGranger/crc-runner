@@ -83,21 +83,18 @@ class UserCrcRunner(ServiceInterface):
     def __init__(self):
         self.monitor = crc.CrcMonitor(POLL_INTERVAL_SECONDS)
         self._drain_tasks: list[asyncio.Task] = []
-        self.stop_task: asyncio.Task | None = None
-        self.stop_requested = asyncio.Event()
-
-    async def check_for_stop(self, awaitable: typing.Awaitable[T]) -> T:
-        return await check_event(awaitable, self.stop_requested, StopRequested)
+        self.start_task: asyncio.Task[int] | None = None
+        self.stop_task: asyncio.Task[int] | None = None
 
     async def _crc_start(self) -> int:
         start_proc = await crc.start()
         stderr = cast(StreamReader, start_proc.stderr)
         start_log = log.getChild("crc start")
 
+        log_lines_task = mktask(checking_log(stderr, MismatchedBundleError, start_log))
+
         try:
-            await check_signal(
-                checking_log(stderr, MismatchedBundleError, start_log), SIGTERM
-            )
+            await log_lines_task
             retcode = await start_proc.wait()
         except MismatchedBundleError:
             msg = "Bundle mismatch. Manually delete cluster and run again."
@@ -107,15 +104,15 @@ class UserCrcRunner(ServiceInterface):
             retcode = await start_proc.wait()
             log.error("`crc start` had exit status %s", retcode)
             sys.exit(retcode)
-        except SignalError as e:
-            log.info("Got SIGTERM, cancelling CRC start")
-            e.task.cancel()  # existing line reader
+        except CancelledError:
+            log.warning("startup cancelled, trying to terminate start task")
             # Drain lines while also shutting down.
             lines_task = asyncio.create_task(
                 future_coro(asyncio.shield(non_checking_log(stderr, start_log)))
             )
             self._drain_tasks.append(lines_task)
             await asyncio.sleep(0)
+            start_proc.terminate()
             raise
 
         # apparently it can exit with a failure but still have started,
@@ -145,11 +142,16 @@ class UserCrcRunner(ServiceInterface):
             await non_checking_log(stderr, log.getChild("crc stop -f"))
             return await stop_proc.wait()
 
-    @method(name="stop")
-    async def dbus_stop(self) -> "i":  # type: ignore
+    @method(name="terminage")
+    async def dbus_terminate(self) -> "i":  # type: ignore
+        return await self.terminate()
+
+    async def terminate(self) -> int:
+        if self.start_task is not None:
+            self.start_task.cancel()
         return await self.stop()
 
-    async def stop(self):
+    async def stop(self) -> int:
         if self.stop_task is None:
             self.stop_task = mktask(self._crc_stop())
             log.info("Waiting on stop")
@@ -157,36 +159,29 @@ class UserCrcRunner(ServiceInterface):
         return await self.stop_task
 
     async def start(self):
+        if self.start_task is None:
+            self.start_task = mktask(self._start())
+
+        return await self.start_task
+
+    async def _start(self) -> int:
         try:
             # wait for start
-            await self._crc_start()
-        except SignalError as e:
-            log.info("Got SIGTERM, stopping CRC")
-            await self.stop()
-            sys.exit(128 + SIGTERM)
-
-        try:
+            retcode = await self._crc_start()
             log.info("Waiting for CRC to successfuly start")
-            await check_signal(self.monitor.ready.wait(), SIGTERM)
+            await self.monitor.ready.wait()
             Notify.ready("CRC Started")
-        except SignalError as e:
-            msg = "Got SIGTERM, stopping CRC"
-
-            log.info(msg)
-            Notify.stopping(msg)
-
-            e.task.cancel()  # monitor wait
-
+        except CancelledError:
+            log.info("Startup cancelled, attempting to stop cluster")
             await self.stop()
-            sys.exit()
+            raise
+
+        self.start_task = None
+        return retcode
 
     async def wait_until_stopped(self):
-        try:
-            await check_signal(self.monitor.stopped.wait(), SIGTERM)
-        except SignalError as e:
-            log.info("Got SIGTERM, stopping CRC")
-            await self.stop()
-            await self.monitor.stopped.wait()
+        # TODO: should report failure if it exits unexpectedly, right?
+        await self.monitor.stopped.wait()
 
     async def wait_for_drains(self):
         await asyncio.wait(self._drain_tasks)
@@ -199,8 +194,20 @@ async def run():
     runner = UserCrcRunner()
     bus.export("/fyi/kmg/crc_runner/Runner1", runner)
     log.info("Starting CRC instance")
-    await runner.start()
-    await runner.wait_until_stopped()
-    await runner.wait_for_drains()
-    bus.disconnect()
-    await bus.wait_for_disconnect()
+
+    # TODO: how to distinguish between regular stop and cancelled stop?
+    # I really hope it's not switching away from CancelledError again 🤦
+    try:
+        try:
+            await runner.start()
+        except CancelledError:
+            pass  # TODO
+
+        try:
+            await runner.wait_until_stopped()
+        except CancelledError:
+            pass  # TODO
+    finally:
+        await runner.wait_for_drains()
+        bus.disconnect()
+        await bus.wait_for_disconnect()
