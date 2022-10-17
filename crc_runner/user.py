@@ -87,6 +87,11 @@ class UserCrcRunner(ServiceInterface):
         self.stop_task: asyncio.Task[int] | None = None
 
     async def _crc_start(self) -> int:
+        """
+        Run `crc start`.  Will terminate the crc start process if cancelled.
+        Note that `crc start` returning successfully doesn't mean the cluster is ready yet.
+        Even more confusingly, `crc start` returning non-zero doesn't mean it failed to start!
+        """
         start_proc = await crc.start()
         stderr = cast(StreamReader, start_proc.stderr)
         start_log = log.getChild("crc start")
@@ -97,6 +102,7 @@ class UserCrcRunner(ServiceInterface):
             await log_lines_task
             retcode = await start_proc.wait()
         except MismatchedBundleError:
+            # Won't have successfully stopped the cluster, so we don't try to stop it here.
             msg = "Bundle mismatch. Manually delete cluster and run again."
             Notify.stopping(msg)
             log.error(msg)
@@ -122,6 +128,11 @@ class UserCrcRunner(ServiceInterface):
         return retcode
 
     async def _crc_stop(self) -> int:
+        """
+        Run `crc stop`.
+        If the log line about not gracefully shutting down occurs,
+        it will try doing `crc stop -f` as well.
+        """
         stop_proc = await crc.stop(force=False)
         stderr = cast(StreamReader, stop_proc.stderr)
         stop_log = log.getChild("crc stop")
@@ -147,11 +158,27 @@ class UserCrcRunner(ServiceInterface):
         return await self.terminate()
 
     async def terminate(self) -> int:
+        """
+        Stop the cluster and exit.
+        If it is currently in the process of starting,
+        it will cancel that and start the exit process.
+        """
         if self.start_task is not None:
             self.start_task.cancel()
+        # _start() will call stop() too when cancelled,
+        # but:
+        # 1. that's good, internally consistent behavior
+        # 2. we need to wait on stopping here
+        # 3. calling stop() is idempotent anyway
+
+        # maybe we shouldn't make it do that though?
         return await self.stop()
 
     async def stop(self) -> int:
+        """
+        "Latch" stop the cluster. That is, if the cluster
+        is already stopping, wait on that.
+        """
         if self.stop_task is None:
             self.stop_task = mktask(self._crc_stop())
             log.info("Waiting on stop")
@@ -159,12 +186,26 @@ class UserCrcRunner(ServiceInterface):
         return await self.stop_task
 
     async def start(self):
+        """
+        "Latch" start the cluster. That is, if the cluster
+        is already in the process of starting, wait on it.
+        If it has already started, return the success or failure of that.
+        """
         if self.start_task is None:
             self.start_task = mktask(self._start())
 
         return await self.start_task
 
     async def _start(self) -> int:
+        """
+        Start the cluster.
+
+        Runs the start command and then waits for `crc status`
+        to report that everything is successfully started.
+
+        Will try to stop the cluster if cancelled, because
+        cancelling `crc start` is not a guarantee that it's stopped.
+        """
         try:
             # wait for start
             retcode = await self._crc_start()
@@ -176,7 +217,6 @@ class UserCrcRunner(ServiceInterface):
             await self.stop()
             raise
 
-        self.start_task = None
         return retcode
 
     async def wait_until_stopped(self):
