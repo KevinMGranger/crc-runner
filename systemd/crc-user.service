@@ -19,4 +19,4 @@ ExecStop=busctl --user --timeout=10min call \
     fyi.kmg.crc_runner \
     /fyi/kmg/crc_runner/Runner1 \
     fyi.kmg.crc_runner.Runner1 \
-    stop
+    terminate
