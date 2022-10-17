@@ -33,10 +33,8 @@ log = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
-# TODO: signal handling sucks and was a mistake. Let's go back to dbus.
-
-# handling these lines properly if they don't close is hard. I guess they'd get epipe.
-# but maybe I just don't use JournalHandler and instead run subprograms through
+# TODO: cancellation is a mistake.
+# Events or something else to be awaited upon concurrently is how we do it.
 class ErrorMessageLineError(Exception):
     ERROR_MESSAGE_SUBSTRING: ClassVar[str]
 
