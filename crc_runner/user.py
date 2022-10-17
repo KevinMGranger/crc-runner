@@ -71,8 +71,10 @@ class CannotGracefullyShutdownError(ErrorMessageLineError):
 
 
 class StopRequested(Exception):
+    "A stop was requested on d bus."
+
     def __init__(self, task: asyncio.Task):
-        self.task = task
+        self.task = tas 
 
 
 class UserCrcRunner(ServiceInterface):
@@ -83,6 +85,7 @@ class UserCrcRunner(ServiceInterface):
         self._drain_tasks: list[asyncio.Task] = []
         self.start_task: asyncio.Task[int] | None = None
         self.stop_task: asyncio.Task[int] | None = None
+        self.stop_signal = asyncio.Event()
 
     async def _crc_start(self) -> int:
         """

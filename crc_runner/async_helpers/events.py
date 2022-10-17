@@ -1,3 +1,4 @@
+"Abstraction(s) for reacting to events."
 from typing import Awaitable, TypeVar, Callable
 from asyncio import create_task, Event, Task, wait, FIRST_COMPLETED
 
@@ -11,8 +12,16 @@ async def check_event(
     event: Event,
     exc_factory: Callable[[Task[T]], Exc],
 ) -> T:
-    """Run a coroutine, raising an exception from the given factory
-    if the event get set."""
+    """
+    Run a coroutine, raising an exception from the given factory
+    if the event gets set.
+
+    The idea is that the event represents some sort of interruption, signal, etc.,
+    and thus should be represented as an exception.
+
+    Returns the result of the other task, or raises its exception / cancellationerror.
+    TODO: is that actually a good abstraction?
+    """
 
     if isinstance(awaitable, Task):
         task = awaitable
